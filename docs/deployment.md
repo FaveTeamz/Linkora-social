@@ -7,6 +7,8 @@ This guide covers production deployment of the three Linkora backend services:
 | `services/indexer`          | 3000         | Off-chain Soroban event indexer and REST/WebSocket API |
 | `services/dm-relay`         | 3001         | Transport-only E2EE direct-message relay               |
 | `services/analytics-oracle` | 4000         | Ed25519 analytics attestation oracle                   |
+| `services/notification`     | 3002         | Push-notification fanout and delivery service *(planned)* |
+| `services/search`           | 3003         | Full-text and semantic content search service *(planned)* |
 
 ---
 
@@ -22,6 +24,8 @@ This guide covers production deployment of the three Linkora backend services:
 7. [Scaling Guidelines](#7-scaling-guidelines)
 8. [Monitoring and Alerting](#8-monitoring-and-alerting)
 9. [Backup and Recovery](#9-backup-and-recovery)
+10. [Notification Service](#10-notification-service-servicessnotification)
+11. [Search Service](#11-search-service-servicessearch)
 
 ---
 
@@ -821,3 +825,231 @@ Redis holds only transient rate-limit state. No backup is required — on restar
 Redis is, however, a **hard startup dependency in production**: services validate `REDIS_URL` before binding a port. Treat it as a required component of the deployment, not an optional cache, and make sure every replica of a service resolves to the same Redis endpoint.
 
 ##
+
+---
+
+## 10. Notification Service (`services/notification`)
+
+> **Status: planned.** The notification service has not been implemented yet.
+> This section documents the expected deployment contract so infra can be
+> provisioned ahead of the service going live.
+
+### 10.1 Overview
+
+The notification service fans out push notifications to clients when on-chain or
+relay events (new DMs, likes, tips, governance votes) are dispatched. It
+subscribes to the indexer WebSocket feed and the DM relay event stream, enriches
+events, and delivers them to web-push (VAPID) and mobile-push (APNs / FCM)
+targets registered by each user.
+
+### 10.2 Docker image build
+
+```bash
+docker build \
+  --file services/notification/Dockerfile \
+  --tag linkora-notification:latest \
+  services/notification
+```
+
+### 10.3 Environment variables
+
+| Variable                  | Required | Default       | Description                                                                                                     |
+| ------------------------- | -------- | ------------- | --------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`            | ✅       | —             | PostgreSQL connection string for storing device tokens and delivery receipts                                    |
+| `PORT`                    |          | `3002`        | HTTP server port                                                                                                 |
+| `NODE_ENV`                |          | `development` | Runtime environment. Set to `production` in deployed environments                                               |
+| `REDIS_URL`               | ✅¹      | —             | Redis endpoint for shared rate limiting and fanout pub/sub. **Startup fails in production when unset**          |
+| `ALLOW_IN_MEMORY_RATE_LIMIT` |       | `false`       | Opt out of the `REDIS_URL` requirement for a deliberately single-replica deployment                             |
+| `INDEXER_WS_URL`          | ✅       | —             | WebSocket URL of the indexer service used to subscribe to on-chain events, e.g. `ws://indexer:3000/ws`          |
+| `DM_RELAY_WS_URL`         |          | —             | WebSocket URL of the dm-relay service for DM delivery events, e.g. `ws://dm-relay:3001/ws`                     |
+| `VAPID_PUBLIC_KEY`        | ✅       | —             | Web-push VAPID public key (base64url). Generate with: `npx web-push generate-vapid-keys`                       |
+| `VAPID_PRIVATE_KEY`       | ✅       | —             | Web-push VAPID private key. **Store in a secrets manager; never commit to source control**                      |
+| `VAPID_SUBJECT`           | ✅       | —             | VAPID subject: a mailto or https URL identifying the sender, e.g. `mailto:ops@linkora.io`                       |
+| `FCM_SERVER_KEY`          |          | —             | Firebase Cloud Messaging server key for Android push. **Store in a secrets manager**                            |
+| `APNS_KEY_ID`             |          | —             | Apple Push Notification service key ID for iOS push                                                             |
+| `APNS_TEAM_ID`            |          | —             | Apple developer team ID for APNs                                                                                |
+| `APNS_PRIVATE_KEY`        |          | —             | APNs private key (PEM). **Store in a secrets manager; never commit to source control**                          |
+| `CORS_ORIGIN`             |          | `http://localhost:3000` | Comma-separated allowed CORS origins for the subscription API                                         |
+| `LOG_LEVEL`               |          | `info`        | Minimum log level: `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal`                                |
+
+¹ `REDIS_URL` is required whenever `NODE_ENV=production` — see [§2.4](#24-shared-rate-limiting-redis_url).
+
+### 10.4 Health check endpoint
+
+```
+GET http://localhost:3002/health/ready
+```
+
+The service is ready when its database connection, Redis connection, and
+indexer WebSocket subscription are all healthy:
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "database": { "status": "up", "latencyMs": 4 },
+    "redis": { "status": "up" },
+    "indexer_ws": { "status": "connected" }
+  }
+}
+```
+
+### 10.5 Docker Compose snippet
+
+Add the following service to `docker-compose.yml` once `services/notification`
+is implemented:
+
+```yaml
+notification:
+  build:
+    context: services/notification
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  depends_on:
+    postgres-notification:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    indexer:
+      condition: service_healthy
+  environment:
+    DATABASE_URL: postgresql://linkora:${POSTGRES_PASSWORD}@postgres-notification:5432/linkora_notification
+    REDIS_URL: redis://redis:6379
+    INDEXER_WS_URL: ws://indexer:3000/ws
+    VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+    VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+    VAPID_SUBJECT: ${VAPID_SUBJECT}
+    NODE_ENV: production
+  ports:
+    - "3002:3002"
+  healthcheck:
+    test: ["CMD-SHELL", "curl -f http://localhost:3002/health/ready || exit 1"]
+    interval: 15s
+    timeout: 5s
+    retries: 3
+    start_period: 30s
+```
+
+### 10.6 Scaling notes
+
+- The fanout subscriber (indexer WebSocket connection) should run on **one
+  primary replica**. Additional replicas can serve the HTTP subscription
+  registration API without subscribing to the event stream.
+- Use Redis pub/sub to distribute fanout work across replicas once load
+  warrants it.
+- APNs connections maintain persistent long-lived TCP sessions — plan
+  connection-pool sizing accordingly.
+- `REDIS_URL` is mandatory in production and must point at the same endpoint
+  as all other services to share the rate-limit store.
+
+---
+
+## 11. Search Service (`services/search`)
+
+> **Status: planned.** The search service has not been implemented yet.
+> This section documents the expected deployment contract so infra can be
+> provisioned ahead of the service going live.
+
+### 11.1 Overview
+
+The search service provides full-text and semantic content search over posts,
+profiles, and pools. It indexes events from the Linkora indexer and exposes a
+REST query API consumed by the web and mobile frontends.
+
+### 11.2 Docker image build
+
+```bash
+docker build \
+  --file services/search/Dockerfile \
+  --tag linkora-search:latest \
+  services/search
+```
+
+### 11.3 Environment variables
+
+| Variable                 | Required | Default       | Description                                                                                                   |
+| ------------------------ | -------- | ------------- | ------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`           | ✅       | —             | PostgreSQL connection string for the search index tables                                                      |
+| `PORT`                   |          | `3003`        | HTTP server port                                                                                               |
+| `NODE_ENV`               |          | `development` | Runtime environment. Set to `production` in deployed environments                                             |
+| `REDIS_URL`              | ✅¹      | —             | Redis endpoint for shared rate limiting. **Startup fails in production when unset**                           |
+| `ALLOW_IN_MEMORY_RATE_LIMIT` |      | `false`       | Opt out of the `REDIS_URL` requirement for a deliberately single-replica deployment                           |
+| `INDEXER_URL`            | ✅       | —             | Base URL of the indexer REST API used to consume post/profile data, e.g. `http://indexer:3000`               |
+| `INDEXER_WS_URL`         | ✅       | —             | WebSocket URL of the indexer for real-time index updates, e.g. `ws://indexer:3000/ws`                        |
+| `SEARCH_ENGINE`          |          | `pg_trgm`     | Search backend: `pg_trgm` (PostgreSQL trigram, zero extra infra) or `opensearch` (managed OpenSearch cluster) |
+| `OPENSEARCH_URL`         |          | —             | OpenSearch/Elasticsearch endpoint. Required when `SEARCH_ENGINE=opensearch`                                   |
+| `OPENSEARCH_API_KEY`     |          | —             | OpenSearch API key. **Store in a secrets manager; never commit to source control**                            |
+| `MAX_RESULTS_PER_QUERY`  |          | `50`          | Upper bound on results returned per search query to limit DB load                                             |
+| `SEARCH_RATE_LIMIT_RPM`  |          | `60`          | Maximum search requests per minute per IP                                                                     |
+| `CORS_ORIGIN`            |          | `http://localhost:3000` | Comma-separated allowed CORS origins for the search API                                            |
+| `LOG_LEVEL`              |          | `info`        | Minimum log level: `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal`                              |
+
+¹ `REDIS_URL` is required whenever `NODE_ENV=production` — see [§2.4](#24-shared-rate-limiting-redis_url).
+
+### 11.4 Health check endpoint
+
+```
+GET http://localhost:3003/health/ready
+```
+
+The service is ready when its database connection and Redis connection are
+healthy, and the initial index build is complete:
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "database": { "status": "up", "latencyMs": 5 },
+    "redis": { "status": "up" },
+    "index": { "status": "ready", "documentCount": 12450 }
+  }
+}
+```
+
+### 11.5 Docker Compose snippet
+
+Add the following service to `docker-compose.yml` once `services/search`
+is implemented:
+
+```yaml
+search:
+  build:
+    context: services/search
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  depends_on:
+    postgres-search:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    indexer:
+      condition: service_healthy
+  environment:
+    DATABASE_URL: postgresql://linkora:${POSTGRES_PASSWORD}@postgres-search:5432/linkora_search
+    REDIS_URL: redis://redis:6379
+    INDEXER_URL: http://indexer:3000
+    INDEXER_WS_URL: ws://indexer:3000/ws
+    NODE_ENV: production
+  ports:
+    - "3003:3003"
+  healthcheck:
+    test: ["CMD-SHELL", "curl -f http://localhost:3003/health/ready || exit 1"]
+    interval: 15s
+    timeout: 5s
+    retries: 3
+    start_period: 60s  # Allow time for the initial index build
+```
+
+### 11.6 Scaling notes
+
+- **Stateless** for the `pg_trgm` backend — all search state is in PostgreSQL.
+  Scale replicas freely behind a load balancer.
+- For the `opensearch` backend, scale replicas freely; OpenSearch handles
+  distributed indexing internally.
+- The real-time indexer WebSocket subscriber should run on one primary replica.
+  Use Redis pub/sub to distribute update notifications to other replicas.
+- Tune `MAX_RESULTS_PER_QUERY` and `SEARCH_RATE_LIMIT_RPM` to protect the
+  PostgreSQL database from expensive full-text scans under high traffic.
+- `REDIS_URL` is mandatory in production and must point at the same endpoint as
+  all other services to share the rate-limit store.
+
