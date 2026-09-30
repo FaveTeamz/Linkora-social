@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useWallet } from "@/hooks/useWallet";
 import { PostCard, PostCardSkeleton, type Post } from "@/components/PostCard";
+import { FeedSkeleton } from "@/components/FeedSkeleton";
 import { OptimisticStore, useOptimisticLike, useOptimisticTip } from "@/lib/optimisticStore";
 import { LinkoraClient } from "../../../../../packages/sdk/src/client";
 import { validateAmount, validateStellarAddress } from "@/lib/validate";
@@ -619,13 +620,9 @@ export default function FeedPage() {
                   </div>
                 )}
 
-                {/* Skeletons on initial load */}
+                {/* Skeletons on initial load — count matches PAGE_SIZE to prevent CLS */}
                 {loading ? (
-                  <div className="space-y-4">
-                    <PostCardSkeleton />
-                    <PostCardSkeleton />
-                    <PostCardSkeleton />
-                  </div>
+                  <FeedSkeleton count={PAGE_SIZE} />
                 ) : posts.length === 0 ? (
                   /* Empty state */
                   <div className="space-y-4">
