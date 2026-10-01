@@ -1,6 +1,7 @@
 # Linkora
 
 [![CI](https://github.com/ijayabby/Linkora-social/actions/workflows/ci.yml/badge.svg)](https://github.com/ijayabby/Linkora-social/actions/workflows/ci.yml)
+[![Notification Service CI](https://github.com/ijayabby/Linkora-social/actions/workflows/notification-ci.yml/badge.svg)](https://github.com/ijayabby/Linkora-social/actions/workflows/notification-ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Telegram](https://img.shields.io/badge/Telegram-Join-blue?logo=telegram)](https://t.me/+13csp8G4ccRhY2Zk)
 
@@ -21,6 +22,7 @@ Linkora is an open-source SocialFi platform built on Stellar and Soroban. It com
 | `apps/web`                  | 🔧 In progress — Next.js web frontend           |
 | `apps/mobile`               | 🔧 In progress — Expo / React Native mobile app |
 | `services/indexer`          | 🔧 In progress — off-chain event indexer        |
+| `services/notification`     | 🔧 In progress — multi-channel notification svc |
 | `services/dm-relay`         | 🔧 In progress — E2EE direct-message relay      |
 | `services/analytics-oracle` | 🔧 In progress — on-chain analytics oracle      |
 | `examples/mini-apps`        | ✅ Example mini apps available                  |
@@ -106,6 +108,26 @@ schema snapshot after an intentional change.
 | [Mini Apps Developer Guide](./docs/mini-apps/DEVELOPER_GUIDE.md) | Build and submit a Linkora mini app                       |
 | [Mini Apps Bridge API](./docs/mini-apps/BRIDGE_API.md)           | Bridge method reference                                   |
 | [Security Policy](./SECURITY.md)                                 | Vulnerability disclosure guidance                         |
+
+---
+
+## Docker Resource Limits
+
+Each service in `docker-compose.yml` has explicit memory limits via
+`deploy.resources.limits` to prevent OOM issues during local development:
+
+| Service            | Memory limit | Rationale                                    |
+| ------------------ | ------------ | -------------------------------------------- |
+| `postgres`         | 512 MB       | Shared DB; sufficient for a dev dataset      |
+| `redis`            | 64 MB        | Rate-limit counters only                     |
+| `indexer`          | 512 MB       | Full-text search + event replay              |
+| `dm-relay`         | 256 MB       | WebSocket connections + E2EE message routing |
+| `analytics-oracle` | 512 MB       | On-chain metric aggregation                  |
+
+> **Note**: `deploy.resources` is honoured by Docker Compose v2 with the
+> default `local` driver. If you use an older Compose file or a Swarm/ECS
+> deploy target, the limits are still respected — they map to container-level
+> `--memory` flags.
 
 ---
 

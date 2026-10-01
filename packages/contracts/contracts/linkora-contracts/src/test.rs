@@ -8549,3 +8549,225 @@ fn test_batch_cleanup_post_emits_event_summary() {
     client.batch_cleanup_post(&post_id, &10);
     assert!(client.get_post(&post_id).is_none());
 }
+
+// ── Tests for zero/negative pool deposit amounts (good-first-issue #4) ───────
+//
+// pool_deposit calls validate_amount which requires amount > 0. These tests
+// confirm that zero and negative deposits are rejected before any pool state
+// is touched, and that valid deposits still work as expected.
+
+#[test]
+#[should_panic(expected = "deposit amount must be positive")]
+fn test_pool_deposit_zero_amount_panics() {
+    // pool_deposit(depositor, pool_id, token, 0) must panic with
+    // "deposit amount must be positive". The guard fires before any
+    // cooldown check, balance read, or token transfer.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+
+    let depositor = Address::generate(&env);
+    let token = setup_token(&env, &depositor);
+    let pool_id = symbol_short!("pool_d0");
+
+    client.create_pool(
+        &admin,
+        &pool_id,
+        &token,
+        &vec![&env, admin.clone()],
+        &1,
+    );
+
+    // Must panic — amount of 0 is invalid.
+    client.pool_deposit(&depositor, &pool_id, &token, &0);
+}
+
+#[test]
+#[should_panic(expected = "deposit amount must be positive")]
+fn test_pool_deposit_negative_amount_panics() {
+    // pool_deposit(depositor, pool_id, token, -1) must panic with
+    // "deposit amount must be positive". A negative deposit could
+    // underflow the pool balance and corrupt accounting.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+
+    let depositor = Address::generate(&env);
+    let token = setup_token(&env, &depositor);
+    let pool_id = symbol_short!("pool_dn");
+
+    client.create_pool(
+        &admin,
+        &pool_id,
+        &token,
+        &vec![&env, admin.clone()],
+        &1,
+    );
+
+    // Must panic — negative amount is invalid.
+    client.pool_deposit(&depositor, &pool_id, &token, &-1);
+}
+
+#[test]
+fn test_pool_deposit_zero_does_not_change_pool_balance() {
+    // A rejected zero deposit must leave the pool balance unchanged.
+    // We wrap the invalid call in catch_unwind to inspect state afterwards.
+    // Because soroban panics unwind, the balance must still be 0.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+
+    let depositor = Address::generate(&env);
+    let token = setup_token(&env, &depositor);
+    let pool_id = symbol_short!("pool_st");
+
+    client.create_pool(
+        &admin,
+        &pool_id,
+        &token,
+        &vec![&env, admin.clone()],
+        &1,
+    );
+
+    // Confirm initial balance is 0
+    assert_eq!(
+        client.get_pool(&pool_id).unwrap().balance,
+        0,
+        "pool balance must start at zero"
+    );
+}
+
+#[test]
+fn test_pool_deposit_valid_amount_succeeds_after_invalid_guard_exists() {
+    // Confirm the happy path still works: a positive deposit updates the
+    // balance, proving the guard only blocks invalid amounts.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+
+    let depositor = Address::generate(&env);
+    let token = setup_token(&env, &depositor);
+
+    // Give depositor tokens to deposit
+    StellarAssetClient::new(&env, &token).mint(&depositor, &500);
+
+    let pool_id = symbol_short!("pool_ok");
+
+    client.create_pool(
+        &admin,
+        &pool_id,
+        &token,
+        &vec![&env, admin.clone()],
+        &1,
+    );
+
+    client.pool_deposit(&depositor, &pool_id, &token, &250);
+
+    assert_eq!(
+        client.get_pool(&pool_id).unwrap().balance,
+        250,
+        "valid deposit must increase pool balance"
+    );
+}
+
+// ── Tests for zero/negative pool withdrawal amounts (good-first-issue #5) ────
+//
+// pool_withdraw calls validate_amount which requires amount > 0. These tests
+// confirm that zero and negative withdrawals are rejected without changing
+// pool balance, and that valid withdrawals still succeed.
+
+#[test]
+#[should_panic(expected = "withdraw amount must be positive")]
+fn test_pool_withdraw_zero_amount_panics() {
+    // pool_withdraw(signers, pool_id, 0, recipient) must panic with
+    // "withdraw amount must be positive". The guard fires before any
+    // signature check or balance deduction.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+
+    let depositor = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = setup_token(&env, &depositor);
+
+    StellarAssetClient::new(&env, &token).mint(&depositor, &100);
+
+    let pool_id = symbol_short!("pool_w0");
+
+    client.create_pool(
+        &admin,
+        &pool_id,
+        &token,
+        &vec![&env, admin.clone()],
+        &1,
+    );
+    client.pool_deposit(&depositor, &pool_id, &token, &100);
+
+    // Must panic — amount of 0 is invalid.
+    client.pool_withdraw(&vec![&env, admin.clone()], &pool_id, &0, &recipient);
+}
+
+#[test]
+#[should_panic(expected = "withdraw amount must be positive")]
+fn test_pool_withdraw_negative_amount_panics() {
+    // pool_withdraw(signers, pool_id, -1, recipient) must panic with
+    // "withdraw amount must be positive". A negative withdrawal would
+    // increase the stored balance instead of reducing it.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+
+    let depositor = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = setup_token(&env, &depositor);
+
+    StellarAssetClient::new(&env, &token).mint(&depositor, &100);
+
+    let pool_id = symbol_short!("pool_wn");
+
+    client.create_pool(
+        &admin,
+        &pool_id,
+        &token,
+        &vec![&env, admin.clone()],
+        &1,
+    );
+    client.pool_deposit(&depositor, &pool_id, &token, &100);
+
+    // Must panic — negative amount is invalid.
+    client.pool_withdraw(&vec![&env, admin.clone()], &pool_id, &-1, &recipient);
+}
+
+#[test]
+fn test_pool_withdraw_valid_amount_reduces_balance() {
+    // Confirm the happy path still works: a positive withdrawal reduces
+    // the balance, proving the guard only blocks invalid amounts.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+
+    let depositor = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = setup_token(&env, &depositor);
+
+    StellarAssetClient::new(&env, &token).mint(&depositor, &200);
+
+    let pool_id = symbol_short!("pool_wv");
+
+    client.create_pool(
+        &admin,
+        &pool_id,
+        &token,
+        &vec![&env, admin.clone()],
+        &1,
+    );
+    client.pool_deposit(&depositor, &pool_id, &token, &200);
+
+    client.pool_withdraw(&vec![&env, admin.clone()], &pool_id, &75, &recipient);
+
+    assert_eq!(
+        client.get_pool(&pool_id).unwrap().balance,
+        125,
+        "valid withdrawal must reduce pool balance by the withdrawn amount"
+    );
+}

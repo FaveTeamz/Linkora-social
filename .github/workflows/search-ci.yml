@@ -1,0 +1,96 @@
+name: Search Service CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/search/**"
+      - ".github/workflows/search-ci.yml"
+  pull_request:
+    paths:
+      - "services/search/**"
+      - ".github/workflows/search-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint Search Service (Fail-Fast)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    defaults:
+      run:
+        working-directory: services/search
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run linter
+        run: pnpm run lint
+
+  test:
+    name: Type-Check & FTS Integration Tests
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: linkora_search_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: services/search
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check search service
+        run: pnpm run typecheck
+
+      - name: Run unit & FTS integration tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/linkora_search_test
+        run: pnpm run test

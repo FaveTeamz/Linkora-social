@@ -1,8 +1,12 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { validateAmount, validateStellarAddress } from '@/lib/validate';
-import { FieldError } from './FieldError';
+import { useState } from "react";
+import { validateAmount, validateStellarAddress } from "@/lib/validate";
+import { FieldError } from "./FieldError";
+import { FeeTooltip } from "@/components/ui/FeeTooltip";
+
+/** Protocol fee in basis points — kept in sync with the SDK constant. */
+const PROTOCOL_FEE_BPS = 100;
 
 export interface TipFormValues {
   tokenAddress: string;
@@ -21,8 +25,8 @@ interface FormErrors {
 }
 
 export function TipForm({ postId, onSubmit, disabled = false }: TipFormProps) {
-  const [tokenAddress, setTokenAddress] = useState('');
-  const [amount, setAmount] = useState('');
+  const [tokenAddress, setTokenAddress] = useState("");
+  const [amount, setAmount] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -45,7 +49,7 @@ export function TipForm({ postId, onSubmit, disabled = false }: TipFormProps) {
     setSubmitting(true);
     try {
       await onSubmit({ tokenAddress: tokenAddress.trim(), amount: amount.trim() });
-      setAmount('');
+      setAmount("");
     } finally {
       setSubmitting(false);
     }
@@ -61,7 +65,10 @@ export function TipForm({ postId, onSubmit, disabled = false }: TipFormProps) {
       {/* Token address */}
       <div>
         <label htmlFor={`tip-token-${postId}`} className="block text-sm font-medium mb-1">
-          Token Address <span aria-hidden="true" className="text-red-500">*</span>
+          Token Address{" "}
+          <span aria-hidden="true" className="text-red-500">
+            *
+          </span>
         </label>
         <input
           id={`tip-token-${postId}`}
@@ -78,7 +85,7 @@ export function TipForm({ postId, onSubmit, disabled = false }: TipFormProps) {
           aria-invalid={!!errors.tokenAddress}
           placeholder="GABC…XYZ"
           className={`w-full rounded-lg border px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-50 ${
-            errors.tokenAddress ? 'border-red-500' : 'border-gray-300'
+            errors.tokenAddress ? "border-red-500" : "border-gray-300"
           }`}
         />
         <FieldError id={`tip-token-error-${postId}`} message={errors.tokenAddress} />
@@ -86,8 +93,15 @@ export function TipForm({ postId, onSubmit, disabled = false }: TipFormProps) {
 
       {/* Amount */}
       <div>
-        <label htmlFor={`tip-amount-${postId}`} className="block text-sm font-medium mb-1">
-          Amount <span aria-hidden="true" className="text-red-500">*</span>
+        <label
+          htmlFor={`tip-amount-${postId}`}
+          className="flex items-center gap-1 text-sm font-medium mb-1"
+        >
+          Amount{" "}
+          <span aria-hidden="true" className="text-red-500">
+            *
+          </span>
+          <FeeTooltip feeBps={PROTOCOL_FEE_BPS} />
         </label>
         <input
           id={`tip-amount-${postId}`}
@@ -107,7 +121,7 @@ export function TipForm({ postId, onSubmit, disabled = false }: TipFormProps) {
           aria-invalid={!!errors.amount}
           placeholder="0.00"
           className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-50 ${
-            errors.amount ? 'border-red-500' : 'border-gray-300'
+            errors.amount ? "border-red-500" : "border-gray-300"
           }`}
         />
         <FieldError id={`tip-amount-error-${postId}`} message={errors.amount} />
@@ -118,7 +132,7 @@ export function TipForm({ postId, onSubmit, disabled = false }: TipFormProps) {
         disabled={disabled || submitting}
         className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {submitting ? 'Sending…' : 'Send Tip'}
+        {submitting ? "Sending…" : "Send Tip"}
       </button>
     </form>
   );

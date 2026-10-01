@@ -3,8 +3,8 @@ name: Deploy Testnet
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    tags:
+      - "release/*"
 
 permissions:
   contents: read
@@ -37,7 +37,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -56,13 +56,11 @@ jobs:
         run: cargo install --locked stellar-cli
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          # Node version is pinned in .node-version (single source of truth
-          # across CI, setup.sh, and package.json engines fields).
           node-version-file: ".node-version"
           cache: pnpm
           registry-url: "https://registry.npmjs.org"
@@ -74,12 +72,33 @@ jobs:
         id: deploy
         run: ./scripts/deploy_testnet.sh
 
+      - name: Write contract ID to artifact file
+        run: |
+          mkdir -p deployment-artifacts
+          cat <<EOF > deployment-artifacts/contract-id.json
+          {
+            "network": "$NETWORK",
+            "contract_id": "${{ steps.deploy.outputs.contract_id }}",
+            "tag": "${{ github.ref_name }}",
+            "run_id": "${{ github.run_id }}",
+            "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+      - name: Upload contract ID as release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: testnet-contract-id-${{ github.ref_name }}
+          path: deployment-artifacts/contract-id.json
+          retention-days: 90
+
       - name: Add deployment summary
         run: |
           {
             echo "## Linkora Testnet deployment"
             echo ""
             echo "- Network: $NETWORK"
+            echo "- Tag: \`${{ github.ref_name }}\`"
             echo "- CONTRACT_ID: \`${{ steps.deploy.outputs.contract_id }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -114,3 +133,30 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --tag next
+
+      - name: Notify Telegram — success
+        if: success()
+        uses: appleboy/telegram-action@v1.1.1
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ✅ *Linkora Testnet Deploy — SUCCESS*
+
+            • Tag: `${{ github.ref_name }}`
+            • Contract ID: `${{ steps.deploy.outputs.contract_id }}`
+            • Network: `testnet`
+            • Run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+      - name: Notify Telegram — failure
+        if: failure()
+        uses: appleboy/telegram-action@v1.1.1
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ❌ *Linkora Testnet Deploy — FAILED*
+
+            • Tag: `${{ github.ref_name }}`
+            • Network: `testnet`
+            • Run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})

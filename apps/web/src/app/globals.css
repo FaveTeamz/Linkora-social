@@ -338,3 +338,24 @@ body {
 .pb-safe {
   padding-bottom: calc(4rem + env(safe-area-inset-bottom));
 }
+
+/* ── FeeTooltip animation ── */
+@keyframes fadeInTooltip {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+
+/* ── Issue #174: Follow/Unfollow button — disable all transitions when the
+   user prefers reduced motion. Covers the CheckIcon slide-in, label
+   cross-fade, and button bg/color transitions. ── */
+@media (prefers-reduced-motion: reduce) {
+  button[aria-pressed],
+  button[aria-pressed] * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

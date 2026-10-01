@@ -155,12 +155,12 @@ export function LeftSidebar() {
   return (
     <aside
       aria-label="Left Sidebar Navigation"
+      className="dashboard-left-sidebar"
       style={{
         width: isCollapsed ? "72px" : "240px",
         minWidth: isCollapsed ? "72px" : "240px",
         backgroundColor: "#0B1120",
         borderRight: "1px solid #334155",
-        display: "flex",
         flexDirection: "column",
         justifyContent: "space-between",
         padding: "20px 12px",

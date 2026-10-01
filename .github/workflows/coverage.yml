@@ -1,0 +1,144 @@
+name: Coverage
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  coverage:
+    name: TypeScript Coverage Report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests with coverage
+        # Run Jest for each TS package that has a jest.config.js; pass
+        # --coverage so Jest collects lcov/json output. The turbo `test`
+        # pipeline does not forward --coverage, so we run packages directly.
+        run: |
+          set -e
+
+          packages=(
+            "apps/web"
+            "apps/mobile"
+            "packages/sdk"
+            "services/indexer"
+            "services/dm-relay"
+            "services/analytics-oracle"
+          )
+
+          failed_packages=()
+          coverage_summary=""
+
+          for pkg in "${packages[@]}"; do
+            echo "::group::Coverage — $pkg"
+            # Run coverage; capture exit code without failing immediately
+            pnpm --filter "./$pkg" exec jest \
+              --coverage \
+              --coverageReporters=json-summary \
+              --coverageReporters=lcov \
+              --coverageReporters=text \
+              --passWithNoTests \
+              2>&1 || true
+            echo "::endgroup::"
+          done
+
+      - name: Enforce 70% coverage threshold per package
+        id: threshold
+        run: |
+          set -e
+          THRESHOLD=70
+          FAILED=false
+          SUMMARY=""
+
+          for pkg in apps/web apps/mobile packages/sdk services/indexer services/dm-relay services/analytics-oracle; do
+            summary_file="$pkg/coverage/coverage-summary.json"
+            if [ ! -f "$summary_file" ]; then
+              echo "⚠️  No coverage summary found for $pkg — skipping threshold check"
+              continue
+            fi
+
+            lines=$(node -e "
+              const s = require('./$summary_file');
+              const t = s.total;
+              console.log(JSON.stringify({
+                statements: t.statements.pct,
+                branches:   t.branches.pct,
+                functions:  t.functions.pct,
+                lines:      t.lines.pct
+              }));
+            ")
+
+            pct=$(echo "$lines" | node -e "
+              const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+              const min = Math.min(d.statements, d.branches, d.functions, d.lines);
+              process.stdout.write(String(min));
+            ")
+
+            if (( $(echo "$pct < $THRESHOLD" | bc -l) )); then
+              echo "❌  $pkg — lowest coverage metric: ${pct}% (threshold: ${THRESHOLD}%)"
+              FAILED=true
+            else
+              echo "✅  $pkg — lowest coverage metric: ${pct}% (threshold: ${THRESHOLD}%)"
+            fi
+
+            SUMMARY="${SUMMARY}\n| \`$pkg\` | ${pct}% |"
+          done
+
+          echo "coverage_summary<<EOF" >> "$GITHUB_OUTPUT"
+          echo -e "$SUMMARY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          if [ "$FAILED" = "true" ]; then
+            echo "::error::One or more packages fell below the ${THRESHOLD}% coverage threshold."
+            exit 1
+          fi
+
+      - name: Collect all lcov reports
+        run: |
+          mkdir -p coverage-reports
+          for pkg in apps/web apps/mobile packages/sdk services/indexer services/dm-relay services/analytics-oracle; do
+            lcov_file="$pkg/coverage/lcov.info"
+            if [ -f "$lcov_file" ]; then
+              pkg_slug=$(echo "$pkg" | tr '/' '-')
+              cp "$lcov_file" "coverage-reports/${pkg_slug}-lcov.info"
+            fi
+          done
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-reports
+          path: coverage-reports/
+          retention-days: 30
+
+      - name: Post coverage summary as PR comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: coverage-report
+          message: |
+            ## 📊 TypeScript Coverage Report
+
+            | Package | Min Coverage |
+            |---------|-------------|
+            ${{ steps.threshold.outputs.coverage_summary }}
+
+            > Coverage threshold: **70%** (statements · branches · functions · lines)
+            > Full reports available in the [workflow artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).

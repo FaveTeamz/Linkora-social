@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useNotifications, Notification } from "@/hooks/useNotifications";
 import { useWalletContext } from "@/components/WalletProvider";
+import { EmptyStateIllustration } from "@/components/ui/EmptyStateIllustration";
 
 function truncateAddress(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
@@ -174,14 +175,12 @@ export default function NotificationsPage() {
       </div>
 
       {notifications.length === 0 ? (
-        <div
-          className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 px-6 py-12 text-center"
+        <EmptyStateIllustration
+          variant="notifications"
+          title="You're all caught up"
+          description="No activity yet. Share your profile to get followers and start receiving notifications."
           data-testid="empty-state"
-        >
-          <p className="text-[var(--text-muted)]">
-            No activity yet. Share your profile to get followers.
-          </p>
-        </div>
+        />
       ) : (
         <>
           <div className="flex flex-col gap-6" data-testid="notifications-list">

@@ -363,6 +363,7 @@ TEST_FILES=(
   "tests/integration/e2e-tipping.test.ts"
   "tests/integration/e2e-governance.test.ts"
   "tests/integration/e2e-dm-relay.test.ts"
+  "tests/integration/e2e-search.test.ts"
 )
 
 for test_file in "${TEST_FILES[@]}"; do

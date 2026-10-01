@@ -13,6 +13,7 @@ import { useRouter } from "expo-router";
 import { useLike } from "../hooks/useLike";
 import { useTheme } from "../theme/useTheme";
 import { PostCardSkeleton as SharedPostCardSkeleton } from "./skeletons/PostCardSkeleton";
+import { BlurhashImage } from "./BlurhashImage";
 
 export { SharedPostCardSkeleton as PostCardSkeleton };
 
@@ -26,6 +27,10 @@ export interface Post {
   like_count: number;
   has_liked?: boolean;
   sync_status?: "synced" | "pending" | "failed";
+  /** Remote URI for the author's avatar image. */
+  avatarUri?: string | null;
+  /** Blurhash placeholder string shown while the avatar loads. */
+  avatarBlurhash?: string | null;
 }
 
 interface FeedPostCardProps {
@@ -116,9 +121,21 @@ export function PostCard(props: PostCardProps) {
       accessibilityLabel={`Post by ${post.username}`}
     >
       <View style={styles.header}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{post.username.charAt(0).toUpperCase()}</Text>
-        </View>
+        {post.avatarUri || post.avatarBlurhash ? (
+          <BlurhashImage
+            uri={post.avatarUri}
+            blurhash={post.avatarBlurhash}
+            width={40}
+            height={40}
+            borderRadius={20}
+            containerStyle={styles.avatarContainer}
+            accessibilityLabel={`${post.username}'s avatar`}
+          />
+        ) : (
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{post.username.charAt(0).toUpperCase()}</Text>
+          </View>
+        )}
         <View style={styles.meta}>
           <Text style={styles.username}>{post.username}</Text>
           <Text style={styles.address}>{shortAddress(post.author)}</Text>
@@ -198,6 +215,9 @@ function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
       backgroundColor: theme.colors.brand.primary,
       alignItems: "center",
       justifyContent: "center",
+      marginRight: 10,
+    },
+    avatarContainer: {
       marginRight: 10,
     },
     avatarText: {

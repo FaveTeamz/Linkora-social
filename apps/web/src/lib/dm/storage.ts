@@ -205,3 +205,62 @@ export function loadSyncCursor(address: string): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(syncCursorKey(address));
 }
+
+// ── Conversation metadata ─────────────────────────────────────────────────────
+
+/**
+ * Lightweight, non-sensitive metadata stored per conversation to populate the
+ * DM list without re-fetching all messages.  The preview is already truncated
+ * to 50 characters before storage.
+ */
+export interface ConversationMeta {
+  /** Truncated plaintext preview of the last message (≤50 chars). */
+  lastMessagePreview: string;
+  /** Unix timestamp (ms) of the last message. */
+  lastMessageTime: number;
+  /** Number of messages received since the conversation was last opened. */
+  unreadCount: number;
+}
+
+function conversationMetaKey(myAddress: string, peerAddress: string): string {
+  return `${PREFIX}conv_meta_${myAddress}_${peerAddress}`;
+}
+
+/**
+ * Persist conversation metadata for the DM list.
+ */
+export function storeConversationMeta(
+  myAddress: string,
+  peerAddress: string,
+  meta: ConversationMeta
+): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(conversationMetaKey(myAddress, peerAddress), JSON.stringify(meta));
+}
+
+/**
+ * Load previously stored conversation metadata.  Returns null if not present.
+ */
+export function loadConversationMeta(
+  myAddress: string,
+  peerAddress: string
+): ConversationMeta | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(conversationMetaKey(myAddress, peerAddress));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ConversationMeta;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Mark a conversation as read by resetting the unread count to 0.
+ * Should be called when the user opens a conversation.
+ */
+export function markConversationRead(myAddress: string, peerAddress: string): void {
+  const meta = loadConversationMeta(myAddress, peerAddress);
+  if (!meta) return;
+  storeConversationMeta(myAddress, peerAddress, { ...meta, unreadCount: 0 });
+}

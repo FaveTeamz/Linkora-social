@@ -1,0 +1,103 @@
+# Publishes Docker images for Linkora backend services to ghcr.io.
+#
+# Trigger: push of any release tag matching v* (e.g. v0.1.0 or v1.0.0).
+#
+# Follows publish-sdk.yml pattern:
+#   1. Parses and validates semver version from tag.
+#   2. Sets up QEMU and Docker Buildx for multi-platform builds (linux/amd64, linux/arm64).
+#   3. Logs in to GitHub Container Registry (ghcr.io).
+#   4. Builds and publishes multi-platform container images for notification, search, and media services.
+#   5. Tags published images with semver (e.g. 1.0.0, v1.0.0) and latest.
+
+name: Publish Docker Images
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-images:
+    name: Build & Publish ${{ matrix.service.name }} Image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - name: notification
+            context: ./services/notification
+            image_name: linkora-notification
+          - name: search
+            context: ./services/search
+            image_name: linkora-search
+          - name: media
+            context: ./services/media
+            image_name: linkora-media
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Derive semver string from tag following publish-sdk.yml pattern ──
+      - name: Parse version from tag
+        id: version
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "TAG_NAME=${TAG}"    >> "$GITHUB_OUTPUT"
+
+      # ── Ensure tag matches valid semantic versioning ──
+      - name: Validate semver format
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-.+)?$ ]]; then
+            echo "::error::Tag ($VERSION) does not follow semantic versioning (e.g. 1.0.0 or 1.0.0-rc.1)."
+            exit 1
+          fi
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.service.image_name }}
+            ghcr.io/${{ github.repository }}/${{ matrix.service.name }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.VERSION }}
+            type=raw,value=v${{ steps.version.outputs.VERSION }}
+
+      - name: Build and push multi-platform Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service.context }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

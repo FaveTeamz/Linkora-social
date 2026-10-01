@@ -1,0 +1,19 @@
+# TruffleHog configuration
+# Docs: https://github.com/trufflesecurity/trufflehog#configuration
+#
+# Use this file to exclude known false positives such as test fixtures,
+# example credentials, and generated mock data.
+
+detectors:
+  - name: HexHighEntropy
+    # Stellar contract IDs (32-byte hex) are high-entropy but not secrets.
+    filter_regexes:
+      - "[0-9a-f]{64}"
+
+# Paths to skip entirely (test fixtures and example files).
+skip_paths:
+  - "tests/"
+  - "examples/"
+  - "docs/"
+  - "**/*.example"
+  - "**/.env.example"

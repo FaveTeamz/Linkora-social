@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 
 import { PoolRow, PoolSearchResult } from "../../components/PoolRow";
@@ -7,8 +7,7 @@ import { ProfileRow, ProfileSearchResult } from "../../components/ProfileRow";
 import { SearchBar } from "../../components/SearchBar";
 import { EmptyState } from "../../components/states/EmptyState";
 import { ErrorState } from "../../components/states/ErrorState";
-import { PoolCardSkeleton } from "../../components/skeletons/PoolCardSkeleton";
-import { ProfileCardSkeleton } from "../../components/skeletons/ProfileCardSkeleton";
+import { SearchResultSkeletonList } from "../../components/skeletons/SearchResultSkeleton";
 import { useTheme } from "../../theme/useTheme";
 
 const DEBOUNCE_MS = 300;
@@ -176,14 +175,7 @@ export default function ExploreScreen() {
         }
       >
         {loading ? (
-          <View style={styles.loadingStack}>
-            <ProfileCardSkeleton />
-            <PoolCardSkeleton />
-            <View style={styles.center}>
-              <ActivityIndicator color={theme.colors.brand.primary} />
-              <Text style={styles.muted}>Searching...</Text>
-            </View>
-          </View>
+          <SearchResultSkeletonList />
         ) : error ? (
           <ErrorState message={error} onRetry={() => setSearchNonce((current) => current + 1)} />
         ) : !hasQuery ? (
@@ -260,20 +252,6 @@ function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
     centerContent: {
       flexGrow: 1,
       justifyContent: "center",
-    },
-    center: {
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 32,
-    },
-    loadingStack: {
-      gap: 16,
-      padding: 16,
-    },
-    muted: {
-      color: theme.colors.text.secondary,
-      fontSize: 13,
-      marginTop: 10,
     },
     summary: {
       color: theme.colors.text.secondary,

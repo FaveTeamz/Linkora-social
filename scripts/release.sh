@@ -55,49 +55,37 @@ update_root_version() {
     print_info "Updated root package.json version to $new_version"
 }
 
-# Function to add changelog entry
-add_changelog_entry() {
+# Function to generate changelog from conventional commits
+generate_changelog() {
     local version=$1
-    local date=$(date +%Y-%m-%d)
-    
-    # Create a temporary file with the new entry
-    local temp_file=$(mktemp)
-    cat > "$temp_file" << EOF
+    print_info "Generating changelog for version $version from conventional commits..."
 
-## [$version] - $date
+    # Ensure CHANGELOG.md exists with standard header if not present
+    if [ ! -f CHANGELOG.md ]; then
+        cat > CHANGELOG.md << 'EOF'
+# Changelog
 
-### Added
-- 
-
-### Changed
-- 
-
-### Fixed
-- 
+All notable changes to this project will be documented in this file.
+See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 EOF
-
-    # Insert the new entry after the header section
-    local header_end=$(grep -n "^## \[" CHANGELOG.md | tail -1 | cut -d: -f1)
-    if [ -z "$header_end" ]; then
-        # No existing entries, add after the header
-        header_end=$(grep -n "^and this project follows" CHANGELOG.md | cut -d: -f1)
     fi
-    
-    head -n "$header_end" CHANGELOG.md > "${temp_file}.new"
-    cat "$temp_file" >> "${temp_file}.new"
-    tail -n +$((header_end + 1)) CHANGELOG.md >> "${temp_file}.new"
-    
-    mv "${temp_file}.new" CHANGELOG.md
-    rm "$temp_file"
-    
-    print_info "Added changelog entry for version $version"
-    print_warning "Please edit CHANGELOG.md to add the actual changes"
+
+    # Generate changelog from conventional commits grouped by Features, Bug Fixes, Documentation
+    local config_file="changelog.config.cjs"
+    if [ -f "$config_file" ]; then
+        npx conventional-changelog -n "$config_file" -i CHANGELOG.md -s
+    else
+        npx conventional-changelog -p conventionalcommits -i CHANGELOG.md -s
+    fi
+
+    print_info "Changelog generated successfully in CHANGELOG.md"
 }
 
 # Function to create git tag
 create_git_tag() {
     local version=$1
+    git add CHANGELOG.md
     git add -A
     git commit -m "Release $version"
     git tag -a "v$version" -m "Release $version"
@@ -167,17 +155,16 @@ main() {
     update_root_version "$new_version"
     
     # Add changelog entry
-    add_changelog_entry "$new_version"
+    generate_changelog "$new_version"
     
     # Create git tag
     create_git_tag "$new_version"
     
     print_info "Release $new_version prepared successfully!"
     print_info "Next steps:"
-    print_info "1. Edit CHANGELOG.md to add the actual changes"
-    print_info "2. Review the changes with 'git diff'"
-    print_info "3. Push with: git push && git push --tags"
-    print_info "4. Create a GitHub release from the tag"
+    print_info "1. Review generated CHANGELOG.md and git diff"
+    print_info "2. Push with: git push && git push --tags"
+    print_info "3. Create a GitHub release from the tag"
 }
 
 # Check if script is being sourced or executed

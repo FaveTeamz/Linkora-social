@@ -79,6 +79,14 @@ export default function ProfileScreen() {
             }}
           />
 
+          <TouchableOpacity
+            style={styles.dashboardButton}
+            onPress={() => router.push("/creator/dashboard" as Parameters<typeof router.push>[0])}
+            accessibilityRole="button"
+          >
+            <Text style={styles.dashboardButtonText}>Creator dashboard</Text>
+          </TouchableOpacity>
+
           <View style={styles.panel}>
             <Text style={styles.eyebrow}>Wallet</Text>
             <TouchableOpacity onPress={copyAddress} activeOpacity={0.6}>
@@ -136,6 +144,19 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 18,
     marginTop: 16,
+  },
+  dashboardButton: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: "#06b6d4",
+    marginTop: 16,
+  },
+  dashboardButtonText: {
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "700",
   },
   eyebrow: {
     color: "#818cf8",

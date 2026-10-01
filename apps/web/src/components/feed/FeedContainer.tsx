@@ -1,3 +1,22 @@
+/**
+ * @module FeedContainer
+ *
+ * Top-level feed container that wires together post fetching, optimistic
+ * creation, and the compose modal. Used on profile pages and standalone feed
+ * embeds. For the full paginated home feed see `apps/web/src/app/feed/page.tsx`.
+ *
+ * @example
+ * ```tsx
+ * import { FeedContainer } from "@/components/feed/FeedContainer";
+ *
+ * // Render a feed scoped to a single author
+ * <FeedContainer authorAddress="GABC…XYZ" />
+ *
+ * // Render a global feed (no author filter)
+ * <FeedContainer />
+ * ```
+ */
+
 "use client";
 
 import React, { useState } from "react";
@@ -6,7 +25,19 @@ import { CreatePostModal } from "../modals/CreatePostModal";
 import { PostCard, PostCardSkeleton } from "../PostCard";
 import { Plus } from "lucide-react";
 
+/**
+ * Props for the {@link FeedContainer} component.
+ */
 export interface FeedContainerProps {
+  /**
+   * Stellar public key of the author whose posts should be displayed.
+   *
+   * When provided the feed is scoped to that author and the "Create Post"
+   * modal pre-fills the author field. When omitted all available posts are
+   * shown (global feed mode).
+   *
+   * @example "GABC…XYZ"
+   */
   authorAddress?: string;
 }
 

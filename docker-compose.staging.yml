@@ -1,0 +1,117 @@
+# docker-compose.staging.yml
+# Staging overlay for the Linkora microservices.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+#
+# This file overrides only the values that differ in staging.
+# All base service definitions remain in docker-compose.yml.
+
+version: "3.9"
+
+services:
+  # ── Notification service ───────────────────────────────────────────────────
+  notification:
+    build:
+      context: ./services/notification
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: staging
+      DATABASE_URL: postgresql://${POSTGRES_USER:-linkora}:${POSTGRES_PASSWORD:-linkora}@postgres:5432/${POSTGRES_DB:-linkora}_notification
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      PORT: 3002
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "3002:3002"
+    networks:
+      - backend
+      - database
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ── Search service ─────────────────────────────────────────────────────────
+  search:
+    build:
+      context: ./services/search
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: staging
+      DATABASE_URL: postgresql://${POSTGRES_USER:-linkora}:${POSTGRES_PASSWORD:-linkora}@postgres:5432/${POSTGRES_DB:-linkora}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      PORT: 3003
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "3003:3003"
+    networks:
+      - backend
+      - database
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ── Media service ──────────────────────────────────────────────────────────
+  media:
+    build:
+      context: ./services/media
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: staging
+      DATABASE_URL: postgresql://${POSTGRES_USER:-linkora}:${POSTGRES_PASSWORD:-linkora}@postgres:5432/${POSTGRES_DB:-linkora}_media
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      PORT: 3004
+      STORAGE_BUCKET: ${STAGING_STORAGE_BUCKET:-linkora-staging-media}
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "3004:3004"
+    networks:
+      - backend
+      - database
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ── Existing services — staging overrides ─────────────────────────────────
+
+  indexer:
+    environment:
+      NODE_ENV: staging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+  dm-relay:
+    environment:
+      NODE_ENV: staging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+  analytics-oracle:
+    environment:
+      NODE_ENV: staging
+      LOG_LEVEL: ${LOG_LEVEL:-info}

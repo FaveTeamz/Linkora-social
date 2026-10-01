@@ -1,0 +1,91 @@
+# Linkora Prometheus Configuration
+#
+# Scrapes metrics from all three backend services.
+# The notification service metrics are exposed on the indexer's /metrics
+# endpoint (port 3000) alongside other indexer counters.
+#
+# Scrape configuration reference:
+#   https://prometheus.io/docs/prometheus/latest/configuration/configuration/
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    env: "${DEPLOY_ENV:-production}"
+
+# Load alerting rules from the companion file.
+rule_files:
+  - "alert-rules.yml"
+
+# Alertmanager configuration (adjust host/port to match your deployment).
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "alertmanager:9093"
+
+scrape_configs:
+  # ── Indexer + Notification Service ─────────────────────────────────────────
+  # The indexer hosts the notification dispatch subsystem. Its /metrics
+  # endpoint exposes both indexer pipeline counters and notification dispatch
+  # metrics (dispatch_total, dispatch_errors_total, etc.).
+  - job_name: "linkora-notification-service"
+    static_configs:
+      - targets:
+          - "indexer:3000"
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - target_label: service
+        replacement: "linkora-notification-service"
+
+  # ── Indexer (general pipeline metrics) ─────────────────────────────────────
+  - job_name: "linkora-indexer"
+    static_configs:
+      - targets:
+          - "indexer:3000"
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - target_label: service
+        replacement: "linkora-indexer"
+
+  # ── DM Relay ────────────────────────────────────────────────────────────────
+  - job_name: "linkora-dm-relay"
+    static_configs:
+      - targets:
+          - "dm-relay:3001"
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - target_label: service
+        replacement: "linkora-dm-relay"
+
+  # ── Analytics Oracle ────────────────────────────────────────────────────────
+  - job_name: "linkora-analytics-oracle"
+    static_configs:
+      - targets:
+          - "analytics-oracle:4000"
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - target_label: service
+        replacement: "linkora-analytics-oracle"
+
+  # ── Prometheus self-monitoring ──────────────────────────────────────────────
+  - job_name: "prometheus"
+    static_configs:
+      - targets:
+          - "localhost:9090"

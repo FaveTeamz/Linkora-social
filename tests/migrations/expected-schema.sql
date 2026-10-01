@@ -603,3 +603,96 @@ ALTER TABLE ONLY public.sent_notifications
     ADD CONSTRAINT sent_notifications_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.raw_events_legacy(id) ON DELETE CASCADE;
 ALTER TABLE ONLY public.tips
     ADD CONSTRAINT tips_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id);
+
+-- Migration 016: reputation_scores
+CREATE TABLE public.reputation_scores (
+    user_address text NOT NULL,
+    score integer DEFAULT 0 NOT NULL,
+    posts_count integer DEFAULT 0 NOT NULL,
+    tips_sent integer DEFAULT 0 NOT NULL,
+    tips_received integer DEFAULT 0 NOT NULL,
+    governance_votes integer DEFAULT 0 NOT NULL,
+    last_computed_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_ledger integer DEFAULT 0 NOT NULL
+);
+ALTER TABLE ONLY public.reputation_scores
+    ADD CONSTRAINT reputation_scores_pkey PRIMARY KEY (user_address);
+CREATE INDEX idx_reputation_scores_score ON public.reputation_scores USING btree (score DESC);
+CREATE INDEX idx_reputation_scores_ledger ON public.reputation_scores USING btree (updated_ledger);
+
+-- Migration 017: creator_analytics
+CREATE SEQUENCE public.creator_analytics_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+CREATE TABLE public.creator_analytics (
+    id bigint DEFAULT nextval('public.creator_analytics_id_seq'::regclass) NOT NULL,
+    creator_address text NOT NULL,
+    snapshot_date date NOT NULL,
+    total_posts integer DEFAULT 0 NOT NULL,
+    total_tips_received bigint DEFAULT 0 NOT NULL,
+    unique_tippers integer DEFAULT 0 NOT NULL,
+    total_followers integer DEFAULT 0 NOT NULL,
+    follower_delta integer DEFAULT 0 NOT NULL,
+    engagement_rate numeric(6,4) DEFAULT 0 NOT NULL,
+    attested_at timestamp with time zone,
+    attestation_sig text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+ALTER TABLE ONLY public.creator_analytics
+    ADD CONSTRAINT creator_analytics_pkey PRIMARY KEY (id);
+CREATE UNIQUE INDEX idx_creator_analytics_creator_date ON public.creator_analytics USING btree (creator_address, snapshot_date);
+CREATE INDEX idx_creator_analytics_creator ON public.creator_analytics USING btree (creator_address, snapshot_date DESC);
+CREATE INDEX idx_creator_analytics_date ON public.creator_analytics USING btree (snapshot_date DESC);
+
+-- Migration 018: search_index (materialized view)
+CREATE MATERIALIZED VIEW public.search_index AS
+ SELECT 'profile'::text AS entity_type,
+    address AS entity_id,
+    username AS title,
+    COALESCE(bio, ''::text) AS body,
+    to_tsvector('english'::regconfig, (COALESCE(username, ''::text) || ' '::text) || COALESCE(bio, ''::text)) AS search_vector,
+    created_at
+   FROM public.profiles
+UNION ALL
+ SELECT 'post'::text AS entity_type,
+    id AS entity_id,
+    author AS title,
+    content AS body,
+    to_tsvector('english'::regconfig, COALESCE(content, ''::text)) AS search_vector,
+    created_at
+   FROM public.posts
+  WHERE (deleted_at IS NULL)
+  WITH NO DATA;
+CREATE UNIQUE INDEX idx_search_index_entity ON public.search_index USING btree (entity_type, entity_id);
+CREATE INDEX idx_search_index_vector ON public.search_index USING gin (search_vector);
+CREATE INDEX idx_search_index_created_at ON public.search_index USING btree (created_at DESC);
+
+-- Migration 019: media_attachments
+CREATE SEQUENCE public.media_attachments_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+CREATE TABLE public.media_attachments (
+    id bigint DEFAULT nextval('public.media_attachments_id_seq'::regclass) NOT NULL,
+    post_id text NOT NULL,
+    media_type text NOT NULL,
+    url text NOT NULL,
+    content_hash text NOT NULL,
+    width_px integer,
+    height_px integer,
+    duration_ms integer,
+    size_bytes bigint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT media_attachments_media_type_check CHECK ((media_type = ANY (ARRAY['image'::text, 'video'::text, 'audio'::text])))
+);
+ALTER TABLE ONLY public.media_attachments
+    ADD CONSTRAINT media_attachments_pkey PRIMARY KEY (id);
+CREATE INDEX idx_media_attachments_post_id ON public.media_attachments USING btree (post_id);
+CREATE INDEX idx_media_attachments_content_hash ON public.media_attachments USING btree (content_hash);
+ALTER TABLE ONLY public.media_attachments
+    ADD CONSTRAINT media_attachments_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id) ON DELETE CASCADE NOT VALID;

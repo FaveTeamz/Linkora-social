@@ -5,7 +5,8 @@ import { AutoResizeTextarea } from "../forms/AutoResizeTextarea";
 import { CharacterCounter } from "./CharacterCounter";
 import { MediaUpload } from "./MediaUpload";
 import { LinkPreview } from "./LinkPreview";
-import { MediaItem } from "@/hooks/useMediaUpload";
+import { useDragDrop } from "@/hooks/useDragDrop";
+import { MediaItem, MAX_MEDIA_COUNT } from "@/hooks/useMediaUpload";
 import { LinkMetadata } from "@/hooks/useLinkPreview";
 import { Link as LinkIcon } from "lucide-react";
 import { utf8Bytes } from "linkora-sdk";
@@ -56,8 +57,17 @@ export function PostComposer({
     onLimitExceeded?.(utf8Bytes(content) > characterLimit);
   }, [content, characterLimit, onLimitExceeded]);
 
+  // Attach drag-and-drop to the entire composer so any area can act as a
+  // drop target, not just the narrow MediaUpload sub-component.
+  const remainingSlots = MAX_MEDIA_COUNT - images.length;
+  const { isDragging: composerIsDragging, dragProps } = useDragDrop({
+    onDrop: onAddImages,
+    remainingSlots,
+    disabled: isCompressing,
+  });
+
   return (
-    <div className="space-y-4">
+    <div {...dragProps} data-testid="post-composer" className="space-y-4">
       {/* Text Section */}
       <div className="space-y-1.5">
         <label className="text-[14px] text-gray-500 font-medium uppercase tracking-wide">
@@ -76,7 +86,8 @@ export function PostComposer({
         </div>
       </div>
 
-      {/* Image Upload Section */}
+      {/* Image Upload Section — receives the composer-level drag state so the
+          overlay activates when the user hovers anywhere in the composer */}
       <MediaUpload
         images={images}
         onAddImages={onAddImages}
@@ -84,6 +95,7 @@ export function PostComposer({
         isCompressing={isCompressing}
         error={mediaError}
         maxUploadBytes={mediaLimit}
+        externalIsDragging={composerIsDragging}
       />
 
       {/* Link Attachment (Plurient) Section */}

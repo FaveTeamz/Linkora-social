@@ -127,6 +127,8 @@ async function createApp() {
       isStarted: () => started,
       startedAt: () => startedAt,
       isShuttingDown: () => shuttingDown,
+      redisUrl: config.redisUrl ?? undefined,
+      version: SERVICE_VERSION,
     })
   );
 

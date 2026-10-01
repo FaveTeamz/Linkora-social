@@ -5,10 +5,11 @@ version: "3.9"
 #
 # Spins up:
 #   1. Local Stellar standalone network (quickstart)
-#   2. PostgreSQL (shared by indexer & dm-relay)
-#   3. Redis (shared rate-limit store for both services)
+#   2. PostgreSQL (shared by indexer, dm-relay & notification service)
+#   3. Redis (shared rate-limit / pub-sub store for all services)
 #   4. Indexer service (configured for local Stellar)
 #   5. DM relay service
+#   6. Notification service (in-app + push dispatch)
 #
 # All services have health checks; the test runner waits for readiness.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -132,6 +133,37 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── Notification Service ─────────────────────────────────────────────────────
+  notification:
+    build:
+      context: ../..
+      dockerfile: services/notification/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-linkora}:${POSTGRES_PASSWORD:-linkora}@postgres:5432/${POSTGRES_DB:-linkora}
+      REDIS_URL: redis://redis:6379
+      INDEXER_URL: http://indexer:3000
+      PORT: "3002"
+      NODE_ENV: test
+      STELLAR_NETWORK: Standalone
+      # Push dispatch is stubbed in test mode — no real FCM/APNs calls.
+      PUSH_PROVIDER: stub
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      indexer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 10

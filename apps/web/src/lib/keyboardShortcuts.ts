@@ -20,6 +20,7 @@ export interface ShortcutDefinition {
 export const SHORTCUTS: readonly ShortcutDefinition[] = [
   // ── Composition ──────────────────────────────────────────────────────────
   { keys: ["n"], label: "Open new post composer", group: "Actions" },
+  { keys: ["c"], label: "Open compose modal", group: "Actions" },
   { keys: ["/"], label: "Focus the global search bar", group: "Actions" },
   { keys: ["?"], label: "Open keyboard shortcuts help", group: "Actions" },
 
@@ -29,7 +30,7 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
   { keys: ["g", "s"], label: "Go to Settings", group: "Navigation" },
 
   // ── General ──────────────────────────────────────────────────────────────
-  { keys: ["Escape"], label: "Close modal / return from view", group: "General" },
+  { keys: ["Escape"], label: "Clear search / close modal", group: "General" },
 ] as const;
 
 /** Groups for ordered rendering in the help modal. */

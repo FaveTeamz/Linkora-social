@@ -12,7 +12,7 @@
  *   - `registerSearchRef` so SearchBar can expose its input for programmatic focus
  *
  * Shortcut behaviour:
- *   n        → open New Post composer
+ *   n / c    → open New Post composer
  *   /        → focus global search bar
  *   ?        → open help modal
  *   Escape   → close help modal (other modals handle their own Esc)
@@ -183,6 +183,7 @@ export function KeyboardShortcutsProvider({ children }: { children: React.ReactN
       // ── Single-key shortcuts ─────────────────────────────────────────────
       switch (key) {
         case "n":
+        case "c":
           event.preventDefault();
           composeHandlerRef.current?.();
           break;

@@ -19,8 +19,8 @@ export function DashboardHeader({ isLoading, onToggleLoading }: DashboardHeaderP
         flexDirection: "column",
         gap: "16px",
         padding: "24px 24px 16px 24px",
-        borderBottom: "1px solid var(--border, #334155)",
-        backgroundColor: "var(--bg-primary, #0B1120)",
+        borderBottom: "1px solid var(--color-border)",
+        backgroundColor: "var(--background)",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -28,7 +28,7 @@ export function DashboardHeader({ isLoading, onToggleLoading }: DashboardHeaderP
           <h1
             style={{
               margin: 0,
-              color: "var(--text-primary, #F8FAFC)",
+              color: "var(--foreground)",
               fontSize: "1.75rem",
               fontWeight: 800,
               letterSpacing: "-0.03em",
@@ -39,7 +39,7 @@ export function DashboardHeader({ isLoading, onToggleLoading }: DashboardHeaderP
           <p
             style={{
               margin: "4px 0 0",
-              color: "var(--text-secondary, #94A3B8)",
+              color: "var(--text-muted)",
               fontSize: "0.9rem",
             }}
           >
@@ -54,9 +54,9 @@ export function DashboardHeader({ isLoading, onToggleLoading }: DashboardHeaderP
             style={{
               padding: "8px 14px",
               borderRadius: "10px",
-              border: "1px solid var(--border, #334155)",
-              backgroundColor: "var(--bg-secondary, #1E293B)",
-              color: "var(--text-secondary, #94A3B8)",
+              border: "1px solid var(--color-border)",
+              backgroundColor: "var(--muted)",
+              color: "var(--text-muted)",
               fontSize: "0.85rem",
               fontWeight: 500,
               cursor: "pointer",
@@ -69,12 +69,13 @@ export function DashboardHeader({ isLoading, onToggleLoading }: DashboardHeaderP
               padding: "8px 18px",
               borderRadius: "10px",
               border: "none",
-              background: "linear-gradient(135deg, #60A5FA 0%, #818CF8 100%)",
-              color: "#FFFFFF",
+              background:
+                "linear-gradient(135deg, var(--color-secondary) 0%, var(--color-primary) 100%)",
+              color: "var(--color-text-on-brand)",
               fontSize: "0.9rem",
               fontWeight: 600,
               cursor: "pointer",
-              boxShadow: "0 4px 12px rgba(96, 165, 250, 0.25)",
+              boxShadow: "0 4px 12px color-mix(in srgb, var(--color-primary) 25%, transparent)",
             }}
           >
             + Create Post
@@ -93,13 +94,9 @@ export function DashboardHeader({ isLoading, onToggleLoading }: DashboardHeaderP
               style={{
                 padding: "8px 16px",
                 borderRadius: "20px",
-                border: isActive
-                  ? "1px solid var(--accent-primary, #60A5FA)"
-                  : "1px solid transparent",
-                backgroundColor: isActive ? "#1E293B" : "transparent",
-                color: isActive
-                  ? "var(--accent-primary, #60A5FA)"
-                  : "var(--text-secondary, #94A3B8)",
+                border: isActive ? "1px solid var(--color-primary)" : "1px solid transparent",
+                backgroundColor: isActive ? "var(--muted)" : "transparent",
+                color: isActive ? "var(--color-primary)" : "var(--text-muted)",
                 fontSize: "0.9rem",
                 fontWeight: isActive ? 600 : 500,
                 cursor: "pointer",

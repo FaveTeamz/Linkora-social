@@ -1,0 +1,211 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ReputationBadge renders correctly for tier 'legend' 1`] = `
+<View
+  accessibilityLabel="Reputation tier: Legend"
+  style={
+    {
+      "alignItems": "center",
+      "alignSelf": "flex-start",
+      "backgroundColor": "#EDE9FE",
+      "borderRadius": 9999,
+      "flexDirection": "row",
+      "gap": 4,
+      "paddingHorizontal": 8,
+      "paddingVertical": 2,
+    }
+  }
+  testID="reputation-badge"
+>
+  <Text
+    style={
+      {
+        "fontSize": 12,
+        "lineHeight": 16,
+      }
+    }
+  >
+    🏆
+  </Text>
+  <Text
+    style={
+      {
+        "color": "#F59E0B",
+        "fontSize": 12,
+        "fontWeight": "600",
+        "lineHeight": 16,
+      }
+    }
+  >
+    Legend
+  </Text>
+</View>
+`;
+
+exports[`ReputationBadge renders correctly for tier 'member' 1`] = `
+<View
+  accessibilityLabel="Reputation tier: Member"
+  style={
+    {
+      "alignItems": "center",
+      "alignSelf": "flex-start",
+      "backgroundColor": "#CFFAFE",
+      "borderRadius": 9999,
+      "flexDirection": "row",
+      "gap": 4,
+      "paddingHorizontal": 8,
+      "paddingVertical": 2,
+    }
+  }
+  testID="reputation-badge"
+>
+  <Text
+    style={
+      {
+        "fontSize": 12,
+        "lineHeight": 16,
+      }
+    }
+  >
+    ⭐
+  </Text>
+  <Text
+    style={
+      {
+        "color": "#06B6D4",
+        "fontSize": 12,
+        "fontWeight": "600",
+        "lineHeight": 16,
+      }
+    }
+  >
+    Member
+  </Text>
+</View>
+`;
+
+exports[`ReputationBadge renders correctly for tier 'newcomer' 1`] = `
+<View
+  accessibilityLabel="Reputation tier: Newcomer"
+  style={
+    {
+      "alignItems": "center",
+      "alignSelf": "flex-start",
+      "backgroundColor": "#F3F4F6",
+      "borderRadius": 9999,
+      "flexDirection": "row",
+      "gap": 4,
+      "paddingHorizontal": 8,
+      "paddingVertical": 2,
+    }
+  }
+  testID="reputation-badge"
+>
+  <Text
+    style={
+      {
+        "fontSize": 12,
+        "lineHeight": 16,
+      }
+    }
+  >
+    🌱
+  </Text>
+  <Text
+    style={
+      {
+        "color": "#6B7280",
+        "fontSize": 12,
+        "fontWeight": "600",
+        "lineHeight": 16,
+      }
+    }
+  >
+    Newcomer
+  </Text>
+</View>
+`;
+
+exports[`ReputationBadge renders correctly for tier 'trusted' 1`] = `
+<View
+  accessibilityLabel="Reputation tier: Trusted"
+  style={
+    {
+      "alignItems": "center",
+      "alignSelf": "flex-start",
+      "backgroundColor": "#DBEAFE",
+      "borderRadius": 9999,
+      "flexDirection": "row",
+      "gap": 4,
+      "paddingHorizontal": 8,
+      "paddingVertical": 2,
+    }
+  }
+  testID="reputation-badge"
+>
+  <Text
+    style={
+      {
+        "fontSize": 12,
+        "lineHeight": 16,
+      }
+    }
+  >
+    🔵
+  </Text>
+  <Text
+    style={
+      {
+        "color": "#3B82F6",
+        "fontSize": 12,
+        "fontWeight": "600",
+        "lineHeight": 16,
+      }
+    }
+  >
+    Trusted
+  </Text>
+</View>
+`;
+
+exports[`ReputationBadge renders correctly for tier 'verified' 1`] = `
+<View
+  accessibilityLabel="Reputation tier: Verified"
+  style={
+    {
+      "alignItems": "center",
+      "alignSelf": "flex-start",
+      "backgroundColor": "#D1FAE5",
+      "borderRadius": 9999,
+      "flexDirection": "row",
+      "gap": 4,
+      "paddingHorizontal": 8,
+      "paddingVertical": 2,
+    }
+  }
+  testID="reputation-badge"
+>
+  <Text
+    style={
+      {
+        "fontSize": 12,
+        "lineHeight": 16,
+      }
+    }
+  >
+    ✅
+  </Text>
+  <Text
+    style={
+      {
+        "color": "#10B981",
+        "fontSize": 12,
+        "fontWeight": "600",
+        "lineHeight": 16,
+      }
+    }
+  >
+    Verified
+  </Text>
+</View>
+`;

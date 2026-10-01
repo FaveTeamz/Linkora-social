@@ -1,4 +1,50 @@
 #!/bin/sh
-# Run lint-staged to check TypeScript/JavaScript and Rust files.
+# Run lint-staged to lint/format staged TypeScript, JavaScript, and Rust files.
 # lint-staged configuration lives in the root package.json.
 npx lint-staged
+
+# Fast type-check only the packages that have staged TypeScript files.
+# This covers all workspaces including new packages:
+#   services/analytics-oracle, services/dm-relay, services/indexer
+# Exits non-zero immediately on any type error (fast-fail).
+
+STAGED_TS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' || true)
+
+if [ -n "$STAGED_TS" ]; then
+  echo "🔍 Type-checking affected workspaces..."
+
+  # Collect unique workspace roots that contain staged .ts/.tsx files
+  WORKSPACES_TO_CHECK=""
+
+  for file in $STAGED_TS; do
+    dir=$(dirname "$file")
+    # Walk up to find the closest package.json (workspace root)
+    while [ "$dir" != "." ] && [ "$dir" != "/" ]; do
+      if [ -f "$dir/package.json" ] && [ -f "$dir/tsconfig.json" ]; then
+        # Avoid duplicates
+        if ! echo "$WORKSPACES_TO_CHECK" | grep -qF "$dir"; then
+          WORKSPACES_TO_CHECK="$WORKSPACES_TO_CHECK $dir"
+        fi
+        break
+      fi
+      dir=$(dirname "$dir")
+    done
+  done
+
+  FAILED=0
+  for ws in $WORKSPACES_TO_CHECK; do
+    echo "  → tsc --noEmit in $ws"
+    if ! (cd "$ws" && npx tsc --noEmit 2>&1); then
+      echo "❌ Type errors in $ws"
+      FAILED=1
+    fi
+  done
+
+  if [ "$FAILED" -eq 1 ]; then
+    echo ""
+    echo "❌ Pre-commit type-check failed. Fix type errors before committing."
+    exit 1
+  fi
+
+  echo "✅ Type-check passed."
+fi

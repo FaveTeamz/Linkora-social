@@ -1,0 +1,15 @@
+# Grafana dashboard provisioning — Linkora dashboards
+# This file is automatically loaded by Grafana on startup.
+
+apiVersion: 1
+
+providers:
+  - name: "Linkora"
+    orgId: 1
+    folder: "Linkora"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards

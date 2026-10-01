@@ -1,3 +1,4 @@
+export * from "./cache.js";
 export * from "./errors.js";
 export * from "./generated/types.js";
 export * from "./client.js";

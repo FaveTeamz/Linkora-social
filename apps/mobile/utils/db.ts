@@ -124,6 +124,15 @@ export async function initDatabase(): Promise<void> {
       sync_cursor INTEGER NOT NULL DEFAULT 0,
       last_read INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      body TEXT NOT NULL,
+      read INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications (created_at DESC);
   `);
 }
 
@@ -493,4 +502,33 @@ export async function setDmLastRead(conversationId: string, timestamp: number): 
        last_read = MAX(last_read, excluded.last_read);`,
     [conversationId, timestamp]
   );
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+export interface NotificationRow {
+  id: string;
+  type: string;
+  body: string;
+  read: number;
+  created_at: number;
+}
+
+/**
+ * Returns all notifications ordered newest-first.
+ */
+export async function getNotifications(): Promise<NotificationRow[]> {
+  return db.getAllAsync<NotificationRow>(
+    `SELECT id, type, body, read, created_at FROM notifications ORDER BY created_at DESC`,
+    []
+  );
+}
+
+/**
+ * Marks every unread notification as read.
+ */
+export async function markAllNotificationsRead(): Promise<void> {
+  await db.runAsync(`UPDATE notifications SET read = 1 WHERE read = 0`, []);
 }

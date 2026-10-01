@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useTip } from "@/hooks/useTip";
+import { FeeTooltip } from "@/components/ui/FeeTooltip";
 
 interface TipModalProps {
   postId: number;
@@ -137,9 +138,12 @@ export function TipModal({ postId, authorName, onClose }: TipModalProps) {
 
               {/* Amount Input */}
               <div style={styles.fieldGroup}>
-                <label htmlFor="tip-amount" style={styles.fieldLabel}>
-                  Amount
-                </label>
+                <div style={styles.labelRow}>
+                  <label htmlFor="tip-amount" style={styles.fieldLabel}>
+                    Amount
+                  </label>
+                  <FeeTooltip feeBps={PROTOCOL_FEE_BPS} />
+                </div>
                 <div style={styles.inputWrapper}>
                   <input
                     id="tip-amount"
@@ -298,6 +302,11 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#94a3b8",
     textTransform: "uppercase",
     letterSpacing: "0.05em",
+  },
+  labelRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
   },
   tokenGrid: {
     display: "grid",

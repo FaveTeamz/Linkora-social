@@ -1,0 +1,101 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`NotificationBadge renders '99+' when count is 100 (exceeds max) 1`] = `
+<View
+  accessibilityLabel="100 unread notifications"
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "#EF4444",
+      "borderRadius": 9999,
+      "height": 18,
+      "justifyContent": "center",
+      "minWidth": 18,
+      "paddingHorizontal": 4,
+    }
+  }
+  testID="notification-badge"
+>
+  <Text
+    numberOfLines={1}
+    style={
+      {
+        "color": "#FFFFFF",
+        "fontSize": 11,
+        "fontWeight": "700",
+        "lineHeight": 14,
+      }
+    }
+  >
+    99+
+  </Text>
+</View>
+`;
+
+exports[`NotificationBadge renders null when count is 0 1`] = `null`;
+
+exports[`NotificationBadge renders null when count is negative 1`] = `null`;
+
+exports[`NotificationBadge renders the count when count is 5 1`] = `
+<View
+  accessibilityLabel="5 unread notifications"
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "#EF4444",
+      "borderRadius": 9999,
+      "height": 18,
+      "justifyContent": "center",
+      "minWidth": 18,
+      "paddingHorizontal": 4,
+    }
+  }
+  testID="notification-badge"
+>
+  <Text
+    numberOfLines={1}
+    style={
+      {
+        "color": "#FFFFFF",
+        "fontSize": 11,
+        "fontWeight": "700",
+        "lineHeight": 14,
+      }
+    }
+  >
+    5
+  </Text>
+</View>
+`;
+
+exports[`NotificationBadge renders the exact count at the boundary (99) 1`] = `
+<View
+  accessibilityLabel="99 unread notifications"
+  style={
+    {
+      "alignItems": "center",
+      "backgroundColor": "#EF4444",
+      "borderRadius": 9999,
+      "height": 18,
+      "justifyContent": "center",
+      "minWidth": 18,
+      "paddingHorizontal": 4,
+    }
+  }
+  testID="notification-badge"
+>
+  <Text
+    numberOfLines={1}
+    style={
+      {
+        "color": "#FFFFFF",
+        "fontSize": 11,
+        "fontWeight": "700",
+        "lineHeight": 14,
+      }
+    }
+  >
+    99
+  </Text>
+</View>
+`;

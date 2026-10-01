@@ -41,7 +41,10 @@ export function NavBar() {
   useEffect(() => {
     registerComposeHandler(() => setIsModalOpen(true));
     registerSearchRef(searchInputRef as React.RefObject<HTMLInputElement | null>);
+    const openCreatePost = () => setIsModalOpen(true);
+    window.addEventListener("linkora:open-create-post", openCreatePost);
     return () => {
+      window.removeEventListener("linkora:open-create-post", openCreatePost);
       unregisterComposeHandler();
     };
   }, [registerComposeHandler, unregisterComposeHandler, registerSearchRef]);

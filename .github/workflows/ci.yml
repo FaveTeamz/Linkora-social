@@ -7,18 +7,49 @@ on:
   pull_request:
 
 jobs:
-  js-ci:
-    name: JS/TS — typecheck, test, build
+  lockfile-check:
+    name: Verify pnpm lockfile
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
+        with:
+          # Node version is pinned in .node-version (single source of truth
+          # across CI, setup.sh, and package.json engines fields).
+          node-version-file: ".node-version"
+          cache: pnpm
+
+      - name: Verify pnpm lockfile is up to date
+        # --frozen-lockfile aborts if pnpm-lock.yaml does not satisfy the
+        # current package.json files. This is the canonical way to detect a
+        # stale or hand-edited lockfile before any other job runs.
+        run: pnpm install --frozen-lockfile
+
+      - name: Check lockfile has no uncommitted changes
+        # After a frozen install the lockfile must be identical to what is in
+        # the tree. Any diff here means the lockfile was checked in while out
+        # of sync with package.json.
+        run: git diff --exit-code pnpm-lock.yaml
+
+  js-ci:
+    name: JS/TS — typecheck, test, build
+    runs-on: ubuntu-latest
+    needs: lockfile-check
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
         with:
           # Node version is pinned in .node-version (single source of truth
           # across CI, setup.sh, and package.json engines fields).
@@ -30,26 +61,70 @@ jobs:
 
       - name: Type-check all TypeScript packages
         run: pnpm typecheck
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+
+      - name: Verify reputation and analytics type check
+        run: |
+          pnpm --filter @linkora/reputation typecheck
+          pnpm --filter @linkora/analytics typecheck
 
       - name: Run JS/TS tests
         run: pnpm test
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
 
       - name: Build all packages
         run: pnpm build
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+
+      - name: Show Turbo cache summary
+        if: always()
+        run: |
+          echo "## Turbo Remote Cache Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f .turbo/turbo-build.log ]; then
+            HITS=$(grep -c "cache hit" .turbo/turbo-build.log 2>/dev/null || echo 0)
+            MISSES=$(grep -c "cache miss" .turbo/turbo-build.log 2>/dev/null || echo 0)
+            TOTAL=$((HITS + MISSES))
+            if [ "$TOTAL" -gt 0 ]; then
+              RATIO=$(echo "scale=0; $HITS * 100 / $TOTAL" | bc)
+              echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| Cache hits | $HITS |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| Cache misses | $MISSES |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| Hit ratio | ${RATIO}% |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "_No Turbo cache log found — first run or caching not yet active._" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            # Turbo prints cache stats to stderr/stdout; surface from run logs
+            echo "_Cache stats appear inline in the build/test/typecheck step logs above._" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Remote cache endpoint: Vercel Remote Cache (TURBO_TOKEN + TURBO_TEAM)" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   lint:
     name: Lint TypeScript Packages
     runs-on: ubuntu-latest
+    needs: lockfile-check
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           # Node version is pinned in .node-version (single source of truth
           # across CI, setup.sh, and package.json engines fields).
@@ -61,6 +136,10 @@ jobs:
 
       - name: Run linter
         run: pnpm lint
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
 
   # gitleaks action now requires a paid license for organizations.
   # Disabled until a license is configured or replaced with an alternative.
@@ -69,7 +148,7 @@ jobs:
   #   runs-on: ubuntu-latest
   #   steps:
   #     - name: Checkout repository
-  #       uses: actions/checkout@v4
+  #       uses: actions/checkout@v7
   #       with:
   #         fetch-depth: 0
   #
@@ -90,7 +169,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -98,7 +177,7 @@ jobs:
           targets: wasm32v1-none
 
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -134,3 +213,24 @@ jobs:
           cargo test -p linkora-contracts --test fuzz_credential
           cargo test -p linkora-contracts --test fuzz_governance
           cargo test -p linkora-contracts --test fuzz_oracle
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked --version 0.31.5
+
+      - name: Generate coverage report
+        run: |
+          cargo tarpaulin \
+            --workspace \
+            --exclude-files "contracts/linkora-contracts/tests/*" \
+            --out Html Xml \
+            --output-dir coverage \
+            --fail-under 80 \
+            --timeout 120
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: contract-coverage-report
+          path: packages/contracts/coverage/
+          retention-days: 30

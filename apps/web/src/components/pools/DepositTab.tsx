@@ -5,6 +5,7 @@ import type { PoolData, TokenMeta } from "@/hooks/usePools";
 import { formatTokenAmount, parseTokenAmount } from "@/hooks/usePools";
 import { useDeposit } from "@/hooks/usePoolContract";
 import { TxStatusBanner } from "./TxStatusBanner";
+import { FeeTooltip } from "@/components/ui/FeeTooltip";
 
 interface DepositTabProps {
   pool: PoolData;
@@ -123,9 +124,12 @@ export function DepositTab({
 
           {/* Amount input */}
           <div style={styles.fieldGroup}>
-            <label htmlFor="deposit-amount" style={styles.label}>
-              Amount
-            </label>
+            <div style={styles.labelRow}>
+              <label htmlFor="deposit-amount" style={styles.label}>
+                Amount
+              </label>
+              <FeeTooltip />
+            </div>
             <div style={styles.inputWrapper}>
               <input
                 id="deposit-amount"
@@ -269,6 +273,11 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "var(--text-sm)",
     fontWeight: 600,
     color: "var(--color-text-primary)",
+  },
+  labelRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "var(--space-2)",
   },
   inputWrapper: {
     position: "relative",

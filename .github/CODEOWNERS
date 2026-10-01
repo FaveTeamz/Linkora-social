@@ -10,8 +10,36 @@
 # Smart contracts and their tests
 packages/contracts/             @Epta-Node/maintainers
 
+# SDK package
+packages/sdk/                   @Epta-Node/maintainers
+
+# Shared types package
+packages/types/                 @Epta-Node/maintainers
+
+# Code-generation package
+packages/codegen/               @Epta-Node/maintainers
+
+# Reputation package (new) — requires at least one CODEOWNER approval
+packages/reputation/            @Epta-Node/maintainers
+
+# Analytics package (new) — requires at least one CODEOWNER approval
+packages/analytics/             @Epta-Node/maintainers
+
 # Frontend/Web maintainers
 apps/web/                       @Epta-Node/maintainers
+
+# Mobile app
+apps/mobile/                    @Epta-Node/maintainers
+
+# Existing services
+services/indexer/               @Epta-Node/maintainers
+services/dm-relay/              @Epta-Node/maintainers
+services/analytics-oracle/      @Epta-Node/maintainers
+
+# New services — requires at least one CODEOWNER approval
+services/notification/          @Epta-Node/maintainers
+services/search/                @Epta-Node/maintainers
+services/media/                 @Epta-Node/maintainers
 
 # Documentation maintainers
 docs/                           @Epta-Node/maintainers

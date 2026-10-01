@@ -10,6 +10,7 @@ import React, {
   useState,
 } from "react";
 import { useWalletContext } from "@/components/WalletProvider";
+import { useConfetti } from "@/hooks/useConfetti";
 
 const LS_UNREAD_KEY = "linkora:notifications:unread";
 const LS_NOTIFICATIONS_KEY = "linkora:notifications:items";
@@ -18,7 +19,7 @@ const EXCERPT_LEN = 60;
 const INDEXER_URL = process.env.NEXT_PUBLIC_INDEXER_URL ?? "http://localhost:3001";
 const INDEXER_WS_URL = INDEXER_URL.replace(/^http/, "ws") + "/ws";
 
-export type NotificationType = "follow" | "like" | "tip" | "governance";
+export type NotificationType = "follow" | "like" | "tip" | "mention" | "governance";
 
 export interface Notification {
   id: string;
@@ -146,6 +147,9 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const addressRef = useRef<string | null>(null);
   const idRef = useRef(0);
 
+  // Confetti — fires once per session on the very first tip received
+  const { fireConfetti } = useConfetti();
+
   // Rehydrate the persisted unread badge
   useEffect(() => {
     const stored = localStorage.getItem(LS_UNREAD_KEY);
@@ -208,19 +212,11 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     [incrementUnread]
   );
 
-  return (
-    <NotificationsContext.Provider
-      value={{
-        unreadCount,
-        incrementUnread,
-        decrementUnread,
-        resetUnread,
-        addNotification,
-        updateNotification,
-      }}
-    >
-      {children}
-    </NotificationsContext.Provider>
+  const getNotification = useCallback(
+    (id: string): ActionNotification | undefined => {
+      return actionNotifications[id];
+    },
+    [actionNotifications]
   );
 
   // ---- Inbox notifications (persistent, indexer-driven) ----
@@ -235,8 +231,13 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         return next;
       });
       incrementUnread();
+
+      // 🎉 Celebrate the first tip received in this session
+      if (n.type === "tip") {
+        fireConfetti();
+      }
     },
-    [incrementUnread]
+    [incrementUnread, fireConfetti]
   );
 
   useEffect(() => {
@@ -343,11 +344,16 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const visibleNotifications = inboxNotifications.slice(0, page * PAGE_SIZE);
   const hasMore = inboxNotifications.length > page * PAGE_SIZE;
   const inboxUnreadCount = inboxNotifications.filter((n) => !n.read).length;
+  const actionNotificationsList = useMemo(
+    () => Object.values(actionNotifications),
+    [actionNotifications]
+  );
 
   const value = useMemo(
     () => ({
       unreadCount,
       incrementUnread,
+      decrementUnread,
       resetUnread,
       inboxUnreadCount,
       actionNotifications: actionNotificationsList,
@@ -362,6 +368,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     [
       unreadCount,
       incrementUnread,
+      decrementUnread,
       resetUnread,
       inboxUnreadCount,
       actionNotificationsList,

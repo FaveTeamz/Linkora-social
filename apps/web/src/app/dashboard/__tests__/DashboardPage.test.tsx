@@ -6,9 +6,10 @@ describe("DashboardPage", () => {
   it("renders the three-column dashboard layout elements", () => {
     render(<DashboardPage />);
 
-    // Left Sidebar elements
+    // Left Sidebar + MobileTopTabs both render nav items — use getAllByText
     expect(screen.getByText("Linkora")).toBeInTheDocument();
-    expect(screen.getByText("Ohcine")).toBeInTheDocument();
+    // "Ohcine" appears in both LeftSidebar and MobileTopTabs
+    expect(screen.getAllByText("Ohcine").length).toBeGreaterThanOrEqual(1);
 
     // Main Content Area elements
     expect(screen.getByText("Daskloode")).toBeInTheDocument();

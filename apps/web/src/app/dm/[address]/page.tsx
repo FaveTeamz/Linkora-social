@@ -10,7 +10,13 @@ import {
   base64ToBytes,
   DecryptionError,
 } from "@/lib/dm/crypto";
-import { hasDmKeypair, storeDmKeypair, loadDmKeypair } from "@/lib/dm/storage";
+import {
+  hasDmKeypair,
+  storeDmKeypair,
+  loadDmKeypair,
+  storeConversationMeta,
+  markConversationRead,
+} from "@/lib/dm/storage";
 import {
   sendRelayMessage,
   fetchRelayMessages,
@@ -113,6 +119,19 @@ export default function DirectMessagePage() {
       const raw = await fetchRelayMessages(myAddress, recipientAddress);
       const decrypted = await decryptMessages(raw, recipientPubKey);
       setMessages(decrypted);
+
+      // Persist conversation metadata for the DM list
+      if (decrypted.length > 0) {
+        const last = decrypted[decrypted.length - 1];
+        const preview = last.decryptionFailed
+          ? "Message could not be decrypted"
+          : last.content.slice(0, 50);
+        storeConversationMeta(myAddress, recipientAddress, {
+          lastMessagePreview: preview,
+          lastMessageTime: last.timestamp,
+          unreadCount: 0, // mark read since we're viewing the conversation
+        });
+      }
     } catch (err) {
       setError(`Failed to load messages: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -121,11 +140,14 @@ export default function DirectMessagePage() {
   useEffect(() => {
     if (keysReady && myAddress) {
       connectRelayWs(myAddress);
-      
+
+      // Mark conversation as read as soon as the user opens it
+      markConversationRead(myAddress, recipientAddress);
+
       const unsubscribe = onRelayMessage((payload: any) => {
-        if (payload.type === 'new_message' && payload.sender === recipientAddress) {
+        if (payload.type === "new_message" && payload.sender === recipientAddress) {
           loadMessages();
-        } else if (payload.type === 'typing_status' && payload.sender === recipientAddress) {
+        } else if (payload.type === "typing_status" && payload.sender === recipientAddress) {
           setIsTyping(true);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
           typingTimeoutRef.current = setTimeout(() => {
@@ -267,7 +289,10 @@ export default function DirectMessagePage() {
           </div>
 
           {error && (
-            <div className="mb-4 rounded-lg border border-red-700/50 bg-red-900/20 px-4 py-3 text-sm text-red-400" role="alert">
+            <div
+              className="mb-4 rounded-lg border border-red-700/50 bg-red-900/20 px-4 py-3 text-sm text-red-400"
+              role="alert"
+            >
               {error}
             </div>
           )}
@@ -331,7 +356,10 @@ export default function DirectMessagePage() {
 
       {/* ── Error banner ────────────────────────────────────────────────── */}
       {error && (
-        <div className="flex shrink-0 items-center justify-between border-b border-red-700/50 bg-red-900/20 px-4 py-2 text-sm text-red-400" role="alert">
+        <div
+          className="flex shrink-0 items-center justify-between border-b border-red-700/50 bg-red-900/20 px-4 py-2 text-sm text-red-400"
+          role="alert"
+        >
           <span>{error}</span>
           <button
             onClick={() => setError(null)}
@@ -433,4 +461,3 @@ export default function DirectMessagePage() {
     </div>
   );
 }
-

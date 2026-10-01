@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useWallet } from "@/hooks/useWallet";
+import { EmptyStateIllustration } from "@/components/ui/EmptyStateIllustration";
 import {
   LineChart,
   Line,
@@ -145,10 +146,19 @@ export default function AnalyticsPage() {
         </div>
 
         {state.status === "loading" && (
-          <div className="flex items-center justify-center py-24">
-            <div className="animate-pulse flex flex-col items-center gap-4">
-              <div className="h-8 w-48 bg-[var(--bg-tertiary)] rounded" />
-              <div className="h-4 w-64 bg-[var(--bg-tertiary)] rounded" />
+          <div className="space-y-6" aria-label="Loading creator analytics" aria-busy="true">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {summaryCardLabels.map((label, index) => (
+                <SummaryCardSkeleton key={label} label={label} animationDelay={index * 80} />
+              ))}
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {[0, 1].map((index) => (
+                <div
+                  key={index}
+                  className="h-[350px] animate-pulse rounded-2xl border border-[var(--bg-tertiary)] bg-[var(--bg-secondary)]"
+                />
+              ))}
             </div>
           </div>
         )}
@@ -166,11 +176,11 @@ export default function AnalyticsPage() {
         )}
 
         {state.status === "empty" && (
-          <div className="bg-[var(--bg-secondary)] rounded-2xl border border-[var(--bg-tertiary)] p-12 text-center">
-            <p className="text-[var(--text-muted)]">
-              No analytics data available yet. Create posts to see your metrics.
-            </p>
-          </div>
+          <EmptyStateIllustration
+            variant="creator"
+            title="No analytics data yet"
+            description="Create posts and grow your audience to start seeing your engagement metrics and earnings here."
+          />
         )}
 
         {state.status === "loaded" && <Dashboard data={state.data} />}
@@ -186,11 +196,15 @@ function Dashboard({ data }: { data: AnalyticsData }) {
     <div className="space-y-6">
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <SummaryCard label="Total Tips" value={`${summary.totalTipsXlm} XLM`} />
-        <SummaryCard label="Posts" value={String(summary.totalPosts)} />
-        <SummaryCard label="Likes" value={String(summary.totalLikes)} />
-        <SummaryCard label="Followers" value={String(summary.followerCount)} />
-        <SummaryCard label="Unique Tippers" value={String(summary.uniqueTippers)} />
+        <SummaryCard label="Total Tips" value={`${summary.totalTipsXlm} XLM`} animationDelay={0} />
+        <SummaryCard label="Posts" value={String(summary.totalPosts)} animationDelay={80} />
+        <SummaryCard label="Likes" value={String(summary.totalLikes)} animationDelay={160} />
+        <SummaryCard label="Followers" value={String(summary.followerCount)} animationDelay={240} />
+        <SummaryCard
+          label="Unique Tippers"
+          value={String(summary.uniqueTippers)}
+          animationDelay={320}
+        />
       </div>
 
       {/* Attestation badge */}
@@ -374,9 +388,36 @@ function Dashboard({ data }: { data: AnalyticsData }) {
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
+const summaryCardLabels = ["Total Tips", "Posts", "Likes", "Followers", "Unique Tippers"];
+
+function SummaryCardSkeleton({ label, animationDelay }: { label: string; animationDelay: number }) {
   return (
-    <div className="bg-[var(--bg-secondary)] rounded-2xl border border-[var(--bg-tertiary)] p-4">
+    <div
+      role="status"
+      aria-label={`Loading ${label}`}
+      className="creator-stat-card min-h-[84px] rounded-2xl border border-[var(--bg-tertiary)] bg-[var(--bg-secondary)] p-4"
+      style={{ animationDelay: `${animationDelay}ms` }}
+    >
+      <div className="mb-2 h-3 w-2/3 animate-pulse rounded bg-[var(--bg-tertiary)]" />
+      <div className="h-6 w-4/5 animate-pulse rounded bg-[var(--bg-tertiary)]" />
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  animationDelay,
+}: {
+  label: string;
+  value: string;
+  animationDelay: number;
+}) {
+  return (
+    <div
+      className="creator-stat-card min-h-[84px] rounded-2xl border border-[var(--bg-tertiary)] bg-[var(--bg-secondary)] p-4"
+      style={{ animationDelay: `${animationDelay}ms` }}
+    >
       <p className="text-xs text-[var(--text-muted)] mb-1">{label}</p>
       <p className="text-xl font-bold text-[var(--text-primary)] truncate">{value}</p>
     </div>

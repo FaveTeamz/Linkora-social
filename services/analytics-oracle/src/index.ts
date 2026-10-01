@@ -225,6 +225,8 @@ app.use(
     isStarted: () => started,
     startedAt: () => startedAt,
     isShuttingDown: () => shuttingDown,
+    redisUrl: process.env["REDIS_URL"] ?? undefined,
+    version: process.env["npm_package_version"] ?? "0.1.0",
   })
 );
 

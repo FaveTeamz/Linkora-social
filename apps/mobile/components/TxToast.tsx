@@ -1,3 +1,39 @@
+/**
+ * TxToast — Stellar transaction status toast
+ *
+ * Implements a three-state machine:
+ *
+ *   pending  →  confirmed (success)
+ *            →  failed    (error)
+ *
+ * Visual design per state
+ * ──────────────────────
+ *   pending   — left accent: brand.secondary (cyan)
+ *               icon:  ActivityIndicator (spinner)
+ *   confirmed — left accent: semantic.success (green)
+ *               icon:  ✓ checkmark
+ *   failed    — left accent: semantic.error (red)
+ *               icon:  ✕ X mark
+ *
+ * Accessibility
+ * ─────────────
+ *   The animated container announces itself as a status region with
+ *   `accessibilityLiveRegion="polite"` so screen-readers read the title
+ *   aloud when it appears or when the state transitions.
+ *
+ * Auto-dismiss
+ * ────────────
+ *   Handled by the parent ToastContext.  The component emits
+ *   `onPauseChange(true/false)` while the user's finger is down so the
+ *   context can pause its timer.  Swipe distance > 60 dp triggers
+ *   immediate dismissal via `onDismiss`.
+ *
+ * Usage:
+ *   Controlled entirely through ToastContext helpers:
+ *     showPending()           — show spinner
+ *     showSuccess(txHash)     — transition to confirmed
+ *     showError(message)      — transition to failed
+ */
 import React, { useEffect, useMemo, useRef } from "react";
 import {
   ActivityIndicator,
@@ -12,6 +48,9 @@ import {
 
 import type { ThemeTokens } from "../theme/tokens";
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+/** The three possible transaction states. */
 export type TxToastKind = "pending" | "success" | "error";
 
 export interface TxToastState {
@@ -25,15 +64,102 @@ export interface TxToastState {
 interface TxToastProps {
   toast: TxToastState;
   onDismiss: () => void;
-  /** Called with `true` while the user is touching the toast (pauses auto-dismiss) and `false` on release. */
+  /**
+   * Called with `true` while the user is touching the toast (pauses the
+   * parent's auto-dismiss timer) and `false` on release.
+   */
   onPauseChange?: (paused: boolean) => void;
   theme: ThemeTokens;
 }
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function shortHash(hash: string): string {
   if (hash.length <= 14) return hash;
   return `${hash.slice(0, 8)}…${hash.slice(-6)}`;
 }
+
+/** Resolve the left-accent colour for a given state. */
+function accentColor(kind: TxToastKind, theme: ThemeTokens): string {
+  switch (kind) {
+    case "success":
+      return theme.colors.semantic.success;
+    case "error":
+      return theme.colors.semantic.error;
+    case "pending":
+    default:
+      return theme.colors.brand.secondary;
+  }
+}
+
+/** Resolve the accessible state label for screen-readers. */
+function stateLabel(kind: TxToastKind): string {
+  switch (kind) {
+    case "success":
+      return "Transaction confirmed";
+    case "error":
+      return "Transaction failed";
+    case "pending":
+    default:
+      return "Transaction pending";
+  }
+}
+
+// ─── State icon ──────────────────────────────────────────────────────────────
+
+interface StateIconProps {
+  kind: TxToastKind;
+  theme: ThemeTokens;
+}
+
+function StateIcon({ kind, theme }: StateIconProps) {
+  if (kind === "pending") {
+    return <ActivityIndicator color={theme.colors.brand.primary} size="small" />;
+  }
+
+  if (kind === "success") {
+    return (
+      <View
+        style={[
+          iconStyles.circle,
+          { backgroundColor: theme.colors.semantic.successLight },
+        ]}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+      >
+        <Text style={[iconStyles.glyph, { color: theme.colors.semantic.success }]}>✓</Text>
+      </View>
+    );
+  }
+
+  // error / failed
+  return (
+    <View
+      style={[iconStyles.circle, { backgroundColor: theme.colors.semantic.errorLight }]}
+      accessibilityElementsHidden
+      importantForAccessibility="no"
+    >
+      <Text style={[iconStyles.glyph, { color: theme.colors.semantic.error }]}>✕</Text>
+    </View>
+  );
+}
+
+const iconStyles = StyleSheet.create({
+  circle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  glyph: {
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+});
+
+// ─── TxToast ─────────────────────────────────────────────────────────────────
 
 export function TxToast({ toast, onDismiss, onPauseChange, theme }: TxToastProps) {
   const translateY = useRef(new Animated.Value(-24)).current;
@@ -44,6 +170,7 @@ export function TxToast({ toast, onDismiss, onPauseChange, theme }: TxToastProps
     return `https://stellar.expert/explorer/public/tx/${encodeURIComponent(toast.txHash)}`;
   }, [toast.txHash]);
 
+  // Slide in + fade in on mount
   useEffect(() => {
     Animated.parallel([
       Animated.spring(translateY, {
@@ -61,6 +188,7 @@ export function TxToast({ toast, onDismiss, onPauseChange, theme }: TxToastProps
     ]).start();
   }, [opacity, translateY]);
 
+  // Swipe-to-dismiss pan responder
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -74,7 +202,6 @@ export function TxToast({ toast, onDismiss, onPauseChange, theme }: TxToastProps
             onDismiss();
             return;
           }
-
           Animated.spring(translateY, {
             toValue: 0,
             useNativeDriver: true,
@@ -90,6 +217,10 @@ export function TxToast({ toast, onDismiss, onPauseChange, theme }: TxToastProps
   return (
     <Animated.View
       testID="toast"
+      // Announce state changes to screen-readers without interrupting the user
+      accessibilityLiveRegion="polite"
+      accessibilityRole="status"
+      accessibilityLabel={`${stateLabel(toast.kind)}: ${toast.title}${toast.message ? `. ${toast.message}` : ""}`}
       style={[
         styles.toast,
         {
@@ -104,35 +235,36 @@ export function TxToast({ toast, onDismiss, onPauseChange, theme }: TxToastProps
       onTouchEnd={() => onPauseChange?.(false)}
       onTouchCancel={() => onPauseChange?.(false)}
     >
+      {/* Left colour accent bar — colour varies per state */}
       <View
         style={[
           styles.accent,
-          {
-            backgroundColor:
-              toast.kind === "success"
-                ? theme.colors.semantic.success
-                : toast.kind === "error"
-                  ? theme.colors.semantic.error
-                  : theme.colors.brand.secondary,
-          },
+          { backgroundColor: accentColor(toast.kind, theme) },
         ]}
       />
+
+      {/* Body */}
       <View style={styles.body}>
         <View style={styles.row}>
-          <Text style={[styles.title, { color: theme.colors.text.primary }]}>{toast.title}</Text>
-          {toast.kind === "pending" ? (
-            <ActivityIndicator color={theme.colors.brand.primary} size="small" />
-          ) : null}
+          <Text style={[styles.title, { color: theme.colors.text.primary }]}>
+            {toast.title}
+          </Text>
+
+          {/* Per-state icon: spinner | checkmark | X */}
+          <StateIcon kind={toast.kind} theme={theme} />
         </View>
+
         {toast.message ? (
           <Text style={[styles.message, { color: theme.colors.text.secondary }]}>
             {toast.message}
           </Text>
         ) : null}
+
+        {/* Explorer link — only on confirmed transactions */}
         {toast.kind === "success" && explorerUrl ? (
           <Pressable
             accessibilityRole="link"
-            accessibilityLabel="Open Stellar Expert transaction"
+            accessibilityLabel="Open transaction on Stellar Expert"
             onPress={() => Linking.openURL(explorerUrl).catch(() => undefined)}
             style={styles.linkWrap}
           >
@@ -142,12 +274,21 @@ export function TxToast({ toast, onDismiss, onPauseChange, theme }: TxToastProps
           </Pressable>
         ) : null}
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel="Dismiss toast" onPress={onDismiss}>
-        <Text style={[styles.dismiss, { color: theme.colors.text.secondary }]}>Dismiss</Text>
+
+      {/* Dismiss button */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss notification"
+        onPress={onDismiss}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Text style={[styles.dismiss, { color: theme.colors.text.secondary }]}>✕</Text>
       </Pressable>
     </Animated.View>
   );
 }
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   toast: {
@@ -195,7 +336,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   dismiss: {
-    fontSize: 12,
+    fontSize: 16,
     fontWeight: "600",
+    paddingHorizontal: 2,
   },
 });

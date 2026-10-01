@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -7,8 +7,9 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-} from 'react-native';
-import { usePoolDeposit } from '../hooks/usePoolDeposit';
+} from "react-native";
+import { usePoolDeposit } from "../hooks/usePoolDeposit";
+import { FeeTooltip } from "./FeeTooltip";
 
 interface PoolDepositFormProps {
   poolId: string;
@@ -17,32 +18,32 @@ interface PoolDepositFormProps {
 }
 
 export function PoolDepositForm({ poolId, token, onSuccess }: PoolDepositFormProps) {
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState("");
   const { pending, success, error, txHash, deposit, reset } = usePoolDeposit();
 
   const handleDeposit = useCallback(async () => {
     if (!amount.trim()) {
-      Alert.alert('Validation Error', 'Please enter an amount');
+      Alert.alert("Validation Error", "Please enter an amount");
       return;
     }
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      Alert.alert('Validation Error', 'Amount must be a positive number');
+      Alert.alert("Validation Error", "Amount must be a positive number");
       return;
     }
 
     try {
       await deposit(poolId, amount, token);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Deposit failed';
-      Alert.alert('Error', message);
+      const message = err instanceof Error ? err.message : "Deposit failed";
+      Alert.alert("Error", message);
     }
   }, [amount, deposit, poolId, token]);
 
   const handleReset = useCallback(() => {
     reset();
-    setAmount('');
+    setAmount("");
   }, [reset]);
 
   if (success) {
@@ -83,7 +84,10 @@ export function PoolDepositForm({ poolId, token, onSuccess }: PoolDepositFormPro
 
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>Amount to Deposit</Text>
+      <View style={styles.labelRow}>
+        <Text style={[styles.label, { marginBottom: 0 }]}>Amount to Deposit</Text>
+        <FeeTooltip feeBps={100} />
+      </View>
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
@@ -112,7 +116,7 @@ export function PoolDepositForm({ poolId, token, onSuccess }: PoolDepositFormPro
         onPress={handleDeposit}
         disabled={pending || !amount}
         accessibilityRole="button"
-        accessibilityLabel={pending ? 'Processing deposit' : 'Confirm deposit'}
+        accessibilityLabel={pending ? "Processing deposit" : "Confirm deposit"}
         testID="deposit-button"
       >
         {pending ? (
@@ -127,106 +131,112 @@ export function PoolDepositForm({ poolId, token, onSuccess }: PoolDepositFormPro
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#1e293b',
+    backgroundColor: "#1e293b",
     borderRadius: 12,
     padding: 16,
     marginVertical: 8,
     marginHorizontal: 16,
   },
   label: {
-    color: '#cbd5e1',
+    color: "#cbd5e1",
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     marginBottom: 8,
   },
+  labelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+    gap: 4,
+  },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0f172a',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#0f172a",
     borderRadius: 8,
     paddingHorizontal: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: "#334155",
   },
   input: {
     flex: 1,
-    color: '#f1f5f9',
+    color: "#f1f5f9",
     fontSize: 16,
     paddingVertical: 12,
     paddingRight: 8,
   },
   tokenLabel: {
-    color: '#64748b',
+    color: "#64748b",
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     marginLeft: 8,
   },
   note: {
-    color: '#64748b',
+    color: "#64748b",
     fontSize: 12,
     marginBottom: 12,
-    fontStyle: 'italic',
+    fontStyle: "italic",
   },
   button: {
-    backgroundColor: '#6366f1',
+    backgroundColor: "#6366f1",
     borderRadius: 8,
     paddingVertical: 12,
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: 12,
     minHeight: 44,
-    justifyContent: 'center',
+    justifyContent: "center",
   },
   buttonDisabled: {
-    backgroundColor: '#64748b',
+    backgroundColor: "#64748b",
     opacity: 0.5,
   },
   buttonText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   secondaryButton: {
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
     borderWidth: 1,
-    borderColor: '#6366f1',
+    borderColor: "#6366f1",
     marginTop: 8,
   },
   secondaryButtonText: {
-    color: '#6366f1',
+    color: "#6366f1",
   },
   successContainer: {
-    alignItems: 'center',
+    alignItems: "center",
   },
   successTitle: {
-    color: '#22c55e',
+    color: "#22c55e",
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: "700",
     marginBottom: 8,
   },
   successMessage: {
-    color: '#cbd5e1',
+    color: "#cbd5e1",
     fontSize: 14,
-    textAlign: 'center',
+    textAlign: "center",
     marginBottom: 12,
   },
   txHash: {
-    color: '#64748b',
+    color: "#64748b",
     fontSize: 12,
-    fontFamily: 'monospace',
+    fontFamily: "monospace",
     marginBottom: 16,
   },
   errorContainer: {
-    backgroundColor: '#7f1d1d',
+    backgroundColor: "#7f1d1d",
     borderRadius: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
     marginBottom: 12,
     borderLeftWidth: 4,
-    borderLeftColor: '#dc2626',
+    borderLeftColor: "#dc2626",
   },
   errorText: {
-    color: '#fca5a5',
+    color: "#fca5a5",
     fontSize: 12,
   },
 });

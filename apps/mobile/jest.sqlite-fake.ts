@@ -13,9 +13,10 @@ export function createFakeDb() {
   const dmMessages = new Map<string, Row>();
   const dmSyncState = new Map<string, { sync_cursor: number; last_read: number }>();
   const cachedPosts = new Map<string, Row>();
+  const notifications = new Map<string, Row>();
 
   return {
-    __state: { dmMessages, dmSyncState, cachedPosts },
+    __state: { dmMessages, dmSyncState, cachedPosts, notifications },
 
     execAsync: jest.fn(async () => {}),
 
@@ -244,10 +245,22 @@ export function createFakeDb() {
         return;
       }
 
+      if (sql.includes("UPDATE notifications SET read = 1")) {
+        for (const row of notifications.values()) {
+          if (row.read === 0) row.read = 1;
+        }
+        return;
+      }
+
       throw new Error(`sqliteFake: unhandled runAsync statement: ${sql}`);
     }),
 
     getAllAsync: jest.fn(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes("FROM notifications")) {
+        return Array.from(notifications.values()).sort(
+          (a, b) => (b.created_at as number) - (a.created_at as number)
+        );
+      }
       if (sql.includes("FROM cached_posts WHERE id IN")) {
         const ids = new Set(params as string[]);
         return Array.from(cachedPosts.values()).filter((row) => ids.has(row.id as string));

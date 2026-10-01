@@ -164,9 +164,9 @@ export function SearchPageClient() {
   const hasProfileResults = profiles.length > 0;
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-10">
+    <div className="mx-auto max-w-5xl bg-background px-4 py-10 text-foreground">
       <div className="mb-8">
-        <h1 className="mb-4 text-3xl font-bold">Search</h1>
+        <h1 className="mb-4 text-3xl font-bold text-foreground">Search</h1>
         <SearchBar
           onSearch={submitSearch}
           initialValue={query}
@@ -176,11 +176,11 @@ export function SearchPageClient() {
       </div>
 
       <div className="mb-6 flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center justify-between gap-4">
-        <div className="flex rounded-lg border border-[var(--border)] bg-[var(--muted)] p-1">
+        <div className="flex rounded-lg border border-border bg-background p-1">
           <button
             type="button"
             onClick={() => updateParams({ tab: "posts" })}
-            className={`rounded-md px-4 py-2 text-sm font-semibold ${activeTab === "posts" ? "bg-violet-600 text-white" : "text-[var(--text-muted)] hover:text-[var(--foreground)]"}`}
+            className={`rounded-md px-4 py-2 text-sm font-semibold ${activeTab === "posts" ? "bg-[var(--color-primary)] text-[var(--color-text-on-brand)]" : "text-[var(--text-muted)] hover:text-foreground"}`}
             aria-pressed={activeTab === "posts"}
           >
             Posts
@@ -188,7 +188,7 @@ export function SearchPageClient() {
           <button
             type="button"
             onClick={() => updateParams({ tab: "profiles" })}
-            className={`rounded-md px-4 py-2 text-sm font-semibold ${activeTab === "profiles" ? "bg-violet-600 text-white" : "text-[var(--text-muted)] hover:text-[var(--foreground)]"}`}
+            className={`rounded-md px-4 py-2 text-sm font-semibold ${activeTab === "profiles" ? "bg-[var(--color-primary)] text-[var(--color-text-on-brand)]" : "text-[var(--text-muted)] hover:text-foreground"}`}
             aria-pressed={activeTab === "profiles"}
           >
             Profiles
@@ -202,7 +202,7 @@ export function SearchPageClient() {
               <select
                 value={sort}
                 onChange={(event) => updateParams({ sort: event.target.value })}
-                className="ml-2 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-[var(--foreground)]"
+                className="ml-2 rounded-lg border border-border bg-background px-3 py-2 text-foreground"
               >
                 <option value="relevance">Relevance</option>
                 <option value="recent">Recent</option>
@@ -215,7 +215,7 @@ export function SearchPageClient() {
                 type="date"
                 value={from}
                 onChange={(event) => updateParams({ from: event.target.value })}
-                className="ml-2 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-[var(--foreground)]"
+                className="ml-2 rounded-lg border border-border bg-background px-3 py-2 text-foreground"
               />
             </label>
             <label className="text-sm text-[var(--text-muted)]">
@@ -224,7 +224,7 @@ export function SearchPageClient() {
                 type="date"
                 value={to}
                 onChange={(event) => updateParams({ to: event.target.value })}
-                className="ml-2 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-[var(--foreground)]"
+                className="ml-2 rounded-lg border border-border bg-background px-3 py-2 text-foreground"
               />
             </label>
           </div>
@@ -233,7 +233,7 @@ export function SearchPageClient() {
 
       {error && (
         <div
-          className="mb-6 rounded-lg border border-red-500/50 bg-red-950/40 p-4 text-red-200"
+          className="mb-6 rounded-lg border border-[var(--color-error)] bg-[color-mix(in_srgb,var(--color-error)_12%,var(--background))] p-4 text-[var(--color-error)]"
           role="alert"
         >
           {error}
@@ -241,7 +241,7 @@ export function SearchPageClient() {
       )}
 
       {!hasQuery && (
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)] p-8 text-center text-[var(--text-muted)]">
+        <div className="rounded-lg border border-border bg-background p-8 text-center text-[var(--text-muted)]">
           Enter a search term to find posts and profiles.
         </div>
       )}
@@ -254,7 +254,7 @@ export function SearchPageClient() {
             hasPostResults &&
             visiblePosts.map((post) => <PostCard key={post.id} post={post} query={query} />)}
           {!loading && !error && !hasPostResults && (
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)] p-8 text-center text-[var(--text-muted)]">
+            <div className="rounded-lg border border-border bg-background p-8 text-center text-[var(--text-muted)]">
               No posts found for &quot;{query}&quot;.
             </div>
           )}
@@ -264,14 +264,14 @@ export function SearchPageClient() {
       {hasQuery && activeTab === "profiles" && (
         <div className="space-y-4" aria-live="polite">
           {loading && (
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)] p-8 text-center text-[var(--text-muted)]">
+            <div className="rounded-lg border border-border bg-background p-8 text-center text-[var(--text-muted)]">
               Loading profiles...
             </div>
           )}
           {!loading &&
             !error &&
             hasProfileResults &&
-            profiles.map((profile) => <ProfileCard key={profile.address} profile={profile} />)}
+            profiles.map((profile) => <ProfileCard key={profile.address} profile={profile} query={query} />)}
           {!loading && !error && !hasProfileResults && (
             <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)] p-8 text-center text-[var(--text-muted)]">
               No profiles found for &quot;{query}&quot;.

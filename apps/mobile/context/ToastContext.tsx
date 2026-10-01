@@ -6,13 +6,18 @@ import { useTheme } from "../theme/useTheme";
 
 export type ToastKind = TxToastKind;
 
-/** Default auto-dismiss duration for informational toasts (ms). */
+/** Auto-dismiss duration for a confirmed transaction (ms). */
+export const SUCCESS_DURATION_MS = 5000;
+/** Auto-dismiss duration for errors (ms). */
+export const ERROR_DURATION_MS = 8000;
+/** Default auto-dismiss for informational toasts (ms). */
 export const DEFAULT_DURATION_MS = 4000;
-/** Default auto-dismiss duration for errors / in-flight transactions (ms). */
-export const LONG_DURATION_MS = 8000;
 
-/** Kinds that should persist longer than informational toasts by default. */
-const LONG_KINDS: ReadonlySet<ToastKind> = new Set(["error", "pending"]);
+/**
+ * Kinds that should persist until explicitly dismissed.
+ * Pending toasts stay until the caller calls showSuccess / showError.
+ */
+const PERSISTENT_KINDS: ReadonlySet<ToastKind> = new Set<ToastKind>(["pending"]);
 
 export interface ToastState {
   id: number;
@@ -84,8 +89,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
 
   useEffect(() => {
     if (!toast || toast.persistent) return undefined;
+    // Pending toasts are persistent — they wait for showSuccess / showError.
+    if (PERSISTENT_KINDS.has(toast.kind)) return undefined;
     const durationMs =
-      toast.durationMs ?? (LONG_KINDS.has(toast.kind) ? LONG_DURATION_MS : DEFAULT_DURATION_MS);
+      toast.durationMs ??
+      (toast.kind === "success"
+        ? SUCCESS_DURATION_MS
+        : toast.kind === "error"
+          ? ERROR_DURATION_MS
+          : DEFAULT_DURATION_MS);
     const timer = setTimeout(() => {
       if (!paused) dismissToast();
     }, durationMs);

@@ -1,0 +1,119 @@
+# docker-compose.monitoring.yml
+# Monitoring profile: Loki + Grafana log aggregation for all Linkora services.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml \
+#     --profile monitoring up -d
+#
+# All services in the base docker-compose.yml are automatically reconfigured
+# to use the Loki logging driver when this override is active.
+#
+# Grafana is pre-configured with a Loki data source and ships with a
+# "Linkora Services" dashboard (provisioned from ./monitoring/grafana/).
+
+version: "3.9"
+
+x-loki-logging: &loki-logging
+  driver: json-file
+  options:
+    tag: "{{.Name}}"
+
+x-loki-labels: &loki-labels
+  logging: loki
+
+services:
+  # ── Loki — log aggregation backend ────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.1.0
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./monitoring/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki_data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    labels:
+      <<: *loki-labels
+
+  # ── Promtail — log shipper (scrapes Docker container logs) ────────────────
+  promtail:
+    image: grafana/promtail:3.1.0
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command: ["-config.file=/etc/promtail/promtail.yaml"]
+    volumes:
+      - ./monitoring/promtail/promtail.yaml:/etc/promtail/promtail.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    networks:
+      - monitoring
+    depends_on:
+      loki:
+        condition: service_healthy
+    labels:
+      <<: *loki-labels
+
+  # ── Grafana — visualisation and dashboards ────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-linkora}
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3200:3000"
+    networks:
+      - monitoring
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels:
+      <<: *loki-labels
+
+  # ── Service overrides — attach Loki logging driver ────────────────────────
+
+  indexer:
+    logging: *loki-logging
+    labels:
+      <<: *loki-labels
+      service: indexer
+
+  dm-relay:
+    logging: *loki-logging
+    labels:
+      <<: *loki-labels
+      service: dm-relay
+
+  analytics-oracle:
+    logging: *loki-logging
+    labels:
+      <<: *loki-labels
+      service: analytics-oracle
+
+networks:
+  monitoring:
+
+volumes:
+  loki_data:
+  grafana_data:

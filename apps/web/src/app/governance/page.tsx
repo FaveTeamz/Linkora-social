@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useWalletContext } from "@/components/WalletProvider";
 import { LinkoraClient, GovParameter, GovProposal, GovStatus } from "linkora-sdk";
+import { EmptyStateIllustration } from "@/components/ui/EmptyStateIllustration";
 
 const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
@@ -177,9 +178,11 @@ export default function GovernancePage() {
           ) : activeTab === "History" ? (
             <div className="space-y-4">
               {executedProposals.length === 0 ? (
-                <div className="py-8 text-center text-[var(--text-muted)] border border-[var(--border)] rounded-xl bg-[var(--muted)]/20">
-                  No parameter change history.
-                </div>
+                <EmptyStateIllustration
+                  variant="governance"
+                  title="No parameter change history"
+                  description="Executed governance proposals will appear here once the community has voted and applied protocol changes."
+                />
               ) : (
                 executedProposals.map((p) => (
                   <div
@@ -202,9 +205,11 @@ export default function GovernancePage() {
           ) : (
             <div className="space-y-4">
               {displayedProposals.length === 0 ? (
-                <div className="py-8 text-center text-[var(--text-muted)] border border-[var(--border)] rounded-xl bg-[var(--muted)]/20">
-                  No {activeTab.toLowerCase()} proposals.
-                </div>
+                <EmptyStateIllustration
+                  variant="governance"
+                  title={`No ${activeTab.toLowerCase()} proposals`}
+                  description="New governance proposals from the community will appear here. Connect your wallet to create one."
+                />
               ) : (
                 displayedProposals.map((p) => (
                   <div

@@ -7,6 +7,7 @@ import {
   getPostTipTotal,
   type Post,
 } from "@/components/PostCard";
+import { BlurhashImage } from "@/components/BlurhashImage";
 
 interface MasonryCardProps {
   post: Post;
@@ -59,8 +60,15 @@ export function MasonryCard({ post, onLike, onTip, isLiked, isTipping }: Masonry
   return (
     <article className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--color-bg)] shadow-md transition-shadow hover:shadow-lg">
       {post.imageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={post.imageUrl} alt="" className="w-full h-auto" loading="lazy" />
+        <BlurhashImage
+          src={post.imageUrl}
+          alt=""
+          blurhash={post.blurhash}
+          width={800}
+          height={Math.round(800 / aspectRatio)}
+          wrapperClassName="w-full overflow-hidden"
+          className="w-full h-auto"
+        />
       ) : (
         <div
           className="w-full flex items-center justify-center text-white/70 text-3xl font-bold"

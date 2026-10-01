@@ -70,6 +70,7 @@ export interface ReadinessResult {
     backfill: BackfillHealthCheck;
     pool: PoolHealthCheck;
     rateLimiter: RateLimitStoreStatus;
+    redis?: DependencyCheck;
   };
 }
 
@@ -84,7 +85,9 @@ export class HealthMonitor {
     private db: Pool,
     private rpcUrl: string,
     /** Injectable for tests; defaults to the module-level limiter singleton. */
-    private rateLimitStatus: () => RateLimitStoreStatus = getRateLimitStoreStatus
+    private rateLimitStatus: () => RateLimitStoreStatus = getRateLimitStoreStatus,
+    /** Optional Redis URL for connection health check. */
+    private redisUrl: string | null = process.env.REDIS_URL ?? null
   ) {}
 
   /**
@@ -144,6 +147,33 @@ export class HealthMonitor {
     }
   }
 
+  private async checkRedis(): Promise<DependencyCheck | undefined> {
+    if (!this.redisUrl) return undefined;
+    const start = Date.now();
+    let client: import("ioredis").Redis | null = null;
+    try {
+      const { default: Redis } = await import("ioredis");
+      client = new Redis(this.redisUrl, {
+        connectTimeout: 3000,
+        maxRetriesPerRequest: 0,
+        enableReadyCheck: false,
+        lazyConnect: true,
+      });
+      await client.connect();
+      await client.ping();
+      return { status: "up", latencyMs: Date.now() - start };
+    } catch (err: unknown) {
+      return {
+        status: "down",
+        latencyMs: Date.now() - start,
+      };
+    } finally {
+      if (client) {
+        try { await client.quit(); } catch { /* ignore */ }
+      }
+    }
+  }
+
   private checkEventStream(): EventStreamCheck {
     if (this.lastEventAt === null) {
       return { status: "disconnected", lastEventAgo: "n/a" };
@@ -199,13 +229,15 @@ export class HealthMonitor {
           },
           pool: this.checkPool(),
           rateLimiter,
+          ...(this.redisUrl ? { redis: { status: "down" as const, latencyMs: 0 } } : {}),
         },
       };
     }
 
-    const [database, stellar_rpc] = await Promise.all([
+    const [database, stellar_rpc, redis] = await Promise.all([
       this.checkDatabase(),
       this.checkStellarRpc(),
+      this.checkRedis(),
     ]);
     const event_stream = this.checkEventStream();
     const backfill = this.checkBackfill();
@@ -214,14 +246,23 @@ export class HealthMonitor {
     // Not ready if circuit breaker is open or gap is too large.
     const backfillHealthy =
       backfill.status !== "circuit_open" && backfill.status !== "gap_too_large";
-    const ready = database.status === "up" && stellar_rpc.status === "up" && backfillHealthy;
+    const redisHealthy = !redis || redis.status === "up";
+    const ready = database.status === "up" && stellar_rpc.status === "up" && backfillHealthy && redisHealthy;
 
     return {
       ready,
       // An unshared limiter is a real weakness in a scaled deployment, but it
       // is not a reason to pull the pod out of the load balancer.
       degraded: !rateLimiter.shared,
-      checks: { database, stellar_rpc, event_stream, backfill, pool, rateLimiter },
+      checks: {
+        database,
+        stellar_rpc,
+        event_stream,
+        backfill,
+        pool,
+        rateLimiter,
+        ...(redis ? { redis } : {}),
+      },
     };
   }
 }

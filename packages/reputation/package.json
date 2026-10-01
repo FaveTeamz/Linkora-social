@@ -1,0 +1,18 @@
+{
+  "name": "@linkora/reputation",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Linkora reputation scoring primitives",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,71 @@
+name: Deploy — Staging
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/notification/**"
+      - "services/search/**"
+      - "services/media/**"
+      - "services/indexer/**"
+      - "services/dm-relay/**"
+      - "services/analytics-oracle/**"
+      - "docker-compose.yml"
+      - "docker-compose.staging.yml"
+      - ".github/workflows/deploy-staging.yml"
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Space-separated list of services to deploy (default: all new microservices)"
+        required: false
+        default: "notification search media"
+      skip_build:
+        description: "Skip docker compose build step"
+        required: false
+        default: "false"
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy microservices to staging
+    runs-on: ubuntu-latest
+
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_BASE_URL }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.STAGING_SSH_KEY }}
+
+      - name: Add staging host to known_hosts
+        env:
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$STAGING_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy to staging
+        env:
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+          STAGING_USER: ${{ vars.STAGING_USER }}
+          STAGING_DEPLOY_DIR: ${{ vars.STAGING_DEPLOY_DIR }}
+          STAGING_SERVICES: ${{ github.event.inputs.services || 'notification search media' }}
+          COMPOSE_PROJECT: linkora-staging
+          SKIP_BUILD: ${{ github.event.inputs.skip_build || 'false' }}
+        run: bash scripts/deploy_staging.sh
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          status="${{ job.status }}"
+          echo "Staging deployment finished with status: $status"

@@ -1,0 +1,153 @@
+# Publishes Docker images for Linkora services to ghcr.io.
+#
+# Trigger: push of any tag matching services/v* (e.g. services/v0.2.0).
+#
+# Required permissions (granted automatically via GITHUB_TOKEN):
+#   packages: write  – push images to ghcr.io
+#   contents: write  – create GitHub Releases
+#
+# Images published:
+#   ghcr.io/<owner>/linkora-notification
+#   ghcr.io/<owner>/linkora-search
+#   ghcr.io/<owner>/linkora-media
+#
+# Each image is tagged with:
+#   - The semver string from the tag  (e.g. 0.2.0)
+#   - latest
+#
+# All images are built for linux/amd64 and linux/arm64 via Docker Buildx + QEMU.
+# GitHub Actions cache (type=gha) is scoped per service for fast incremental rebuilds.
+
+name: Publish Service Images
+
+on:
+  push:
+    tags:
+      - "services/v*"
+
+permissions:
+  contents: write  # create GitHub Releases
+  packages: write  # push to ghcr.io
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 1 – Derive version string from the pushed tag
+  # ─────────────────────────────────────────────────────────────────────────
+  prepare:
+    name: Prepare Release Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+      tag_name: ${{ steps.version.outputs.TAG_NAME }}
+    steps:
+      # ── Parse semver from tag (services/v1.2.3 → 1.2.3) ─────────────────
+      - name: Parse version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"           # e.g. services/v0.2.0
+          VERSION="${TAG#services/v}"        # strip the services/v prefix → 0.2.0
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "TAG_NAME=${TAG}"    >> "$GITHUB_OUTPUT"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 2 – Build and push each service image (matrix, parallel)
+  # ─────────────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build & Push ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: prepare
+    strategy:
+      # Build all three images in parallel; a failure in one does not cancel
+      # the others so we get a full picture of what passed or failed.
+      fail-fast: false
+      matrix:
+        include:
+          - service: notification
+            dockerfile: services/notification/Dockerfile
+            image: linkora-notification
+          - service: search
+            dockerfile: services/search/Dockerfile
+            image: linkora-search
+          - service: media
+            dockerfile: services/media/Dockerfile
+            image: linkora-media
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── QEMU enables cross-compilation for arm64 on amd64 runners ─────────
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # ── Buildx is required for multi-platform --platform flag ─────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Authenticate to ghcr.io with the built-in GITHUB_TOKEN ───────────
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Generate OCI-compliant tags and labels ────────────────────────────
+      # Produces two tags:
+      #   ghcr.io/<owner>/<image>:<semver>
+      #   ghcr.io/<owner>/<image>:latest
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=latest
+
+      # ── Build the image for both platforms and push to ghcr.io ───────────
+      - name: Build and push ${{ matrix.service }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Per-service GHA cache avoids cross-contamination between images.
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 3 – Create GitHub Release after all images are published
+  # ─────────────────────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [prepare, build-and-push]
+    steps:
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag_name }}
+          name: "Services v${{ needs.prepare.outputs.version }}"
+          body: |
+            Docker images published to ghcr.io for services **v${{ needs.prepare.outputs.version }}**:
+
+            | Image | Tags |
+            |---|---|
+            | `ghcr.io/${{ github.repository_owner }}/linkora-notification` | `${{ needs.prepare.outputs.version }}`, `latest` |
+            | `ghcr.io/${{ github.repository_owner }}/linkora-search` | `${{ needs.prepare.outputs.version }}`, `latest` |
+            | `ghcr.io/${{ github.repository_owner }}/linkora-media` | `${{ needs.prepare.outputs.version }}`, `latest` |
+
+            All images are built for `linux/amd64` and `linux/arm64`.
+
+            ### Pull
+            ```bash
+            docker pull ghcr.io/${{ github.repository_owner }}/linkora-notification:${{ needs.prepare.outputs.version }}
+            docker pull ghcr.io/${{ github.repository_owner }}/linkora-search:${{ needs.prepare.outputs.version }}
+            docker pull ghcr.io/${{ github.repository_owner }}/linkora-media:${{ needs.prepare.outputs.version }}
+            ```
+          draft: false
+          prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}

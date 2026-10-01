@@ -1,0 +1,198 @@
+{
+  "id": null,
+  "uid": "linkora-notifications",
+  "title": "Linkora — Notification Service",
+  "description": "Notification dispatch rate, error rate, and pipeline health for the Linkora indexer notification subsystem.",
+  "tags": ["linkora", "notifications"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "label": "Instance",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "linkora-prometheus" },
+        "query": "label_values(up{job=\"linkora-notification-service\"}, instance)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Notification Dispatch Rate (req/s)",
+      "description": "Rate of notification dispatch attempts per second over the selected window.",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "linkora-prometheus" },
+      "targets": [
+        {
+          "expr": "rate(notification_dispatch_total{instance=~\"$instance\"}[5m])",
+          "legendFormat": "{{instance}} — dispatched",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Notification Dispatch Error Rate (%)",
+      "description": "Percentage of dispatch attempts that resulted in an error. Alert fires at >5% for 5 minutes.",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "linkora-prometheus" },
+      "targets": [
+        {
+          "expr": "100 * rate(notification_dispatch_errors_total{instance=~\"$instance\"}[5m]) / clamp_min(rate(notification_dispatch_total{instance=~\"$instance\"}[5m]), 1e-9)",
+          "legendFormat": "{{instance}} — error %",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 2 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "custom": { "lineWidth": 2, "fillOpacity": 15 }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Total Dispatches (last 1h)",
+      "gridPos": { "x": 0, "y": 8, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "linkora-prometheus" },
+      "targets": [
+        {
+          "expr": "increase(notification_dispatch_total{instance=~\"$instance\"}[1h])",
+          "legendFormat": "dispatched",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "value" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Total Errors (last 1h)",
+      "gridPos": { "x": 6, "y": 8, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "linkora-prometheus" },
+      "targets": [
+        {
+          "expr": "increase(notification_dispatch_errors_total{instance=~\"$instance\"}[1h])",
+          "legendFormat": "errors",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Service Uptime",
+      "gridPos": { "x": 12, "y": 8, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "linkora-prometheus" },
+      "targets": [
+        {
+          "expr": "up{job=\"linkora-notification-service\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Serialization Retries Rate",
+      "description": "PostgreSQL serialization retry rate. Elevated values indicate database contention.",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "linkora-prometheus" },
+      "targets": [
+        {
+          "expr": "rate(serialization_retries_total{instance=~\"$instance\"}[5m])",
+          "legendFormat": "{{instance}} — retries/s",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        }
+      }
+    }
+  ]
+}

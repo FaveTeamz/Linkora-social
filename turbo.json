@@ -5,9 +5,9 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "target/**", ".next/**", ".expo/**"]
     },
-    "dev": { 
-      "persistent": true, 
-      "cache": false 
+    "dev": {
+      "persistent": true,
+      "cache": false
     },
     "lint": {
       "dependsOn": ["^build"]
@@ -23,6 +23,51 @@
     },
     "format": {
       "outputs": []
+    },
+
+    "services/notification#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "services/notification#test": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+
+    "services/search#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "services/search#test": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+
+    "services/media#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "services/media#test": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+
+    "packages/reputation#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "packages/reputation#test": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+
+    "packages/analytics#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "packages/analytics#test": {
+      "dependsOn": ["^build"],
+      "cache": false
     }
   }
 }

@@ -1,6 +1,44 @@
 /**
  * Per-IP / per-address rate limiting middleware for the indexer API.
  *
+ * Sliding Window Approach:
+ * ────────────────────────
+ * This middleware employs a continuous sliding-window algorithm to track and throttle
+ * inbound requests across rolling time intervals (defaulting to 60,000 ms / 1 minute).
+ *
+ * In contrast to fixed-window limiters—which reset counters abruptly at bucket boundaries
+ * and allow burst traffic of up to 2× the threshold around transition boundaries—the sliding
+ * window strictly bounds requests within the rolling duration `[nowMs - windowMs, nowMs]`.
+ * Each request records an epoch millisecond timestamp. When evaluating request admissibility,
+ * all timestamps older than the cutoff (`nowMs - windowMs`) are pruned.
+ *
+ * Store implementations:
+ * - Distributed mode (Redis): Uses an atomic Redis pipeline with sorted sets (`ZREMRANGEBYSCORE`,
+ *   `ZADD`, `ZCARD`, `PEXPIRE`) keyed by prefix (`rl:indexer:<key>`). Request counts are
+ *   strictly consistent across all cluster replicas.
+ * - Single-instance fallback (In-Memory): Maintains a `Map<string, MemoryEntry>` with
+ *   per-key timestamp arrays and automatic TTL-based eviction (`2 × windowMs`) plus periodic
+ *   sweeping to eliminate stale entries without memory leaks.
+ *
+ * Instructions for Customising Limits in Tests:
+ * ─────────────────────────────────────────────
+ * 1. Environment Variable Overrides:
+ *    The default limits are configured via environment variables and evaluated at import:
+ *    - `RATE_LIMIT_ANON_RPM`: Anonymous read limit (defaults to 100).
+ *    - `RATE_LIMIT_AUTH_RPM`: Authenticated read limit (defaults to 300).
+ *    - `RATE_LIMIT_WRITE_RPM`: Write endpoint limit (defaults to 50).
+ *    You can override these variables before loading the module or within test setup.
+ *
+ * 2. Limiter State Resetting:
+ *    Before and after each unit/integration test, clear all active sliding windows to prevent
+ *    cross-test state leakage:
+ *    - For synchronous in-memory tests: call `resetRateLimiter()`.
+ *    - For asynchronous Redis-backed tests: await `resetRateLimiterAsync()`.
+ *
+ * 3. Direct Instance Mocking:
+ *    Access the internal limiter singleton using `getRateLimiterInstance()`, or instantiate
+ *    an isolated `new RateLimiter(mockStore)` to test edge cases with custom window sizes.
+ *
  * Multi-instance behaviour
  * ─────────────────────────
  * When `REDIS_URL` is set the limiter uses a Redis-backed sorted-set store so
@@ -24,10 +62,64 @@ import {
   type RateLimitStoreStatus,
 } from "@linkora/types/src/rate-limit-env";
 
-const RATE_LIMIT_ANON_RPM = parseInt(process.env.RATE_LIMIT_ANON_RPM || "100", 10);
-const RATE_LIMIT_AUTH_RPM = parseInt(process.env.RATE_LIMIT_AUTH_RPM || "300", 10);
-const RATE_LIMIT_WRITE_RPM = parseInt(process.env.RATE_LIMIT_WRITE_RPM || "50", 10);
-const WINDOW_MS = 60_000;
+export const RATE_LIMIT_ANON_RPM = parseInt(process.env.RATE_LIMIT_ANON_RPM || "100", 10);
+export const RATE_LIMIT_AUTH_RPM = parseInt(process.env.RATE_LIMIT_AUTH_RPM || "300", 10);
+export const RATE_LIMIT_WRITE_RPM = parseInt(process.env.RATE_LIMIT_WRITE_RPM || "50", 10);
+export const WINDOW_MS = 60_000;
+
+/**
+ * Specification for a rate limiting rule.
+ */
+export interface RateLimitRule {
+  /** Maximum number of allowed requests within the sliding window. */
+  limit: number;
+  /** Sliding window duration in milliseconds. */
+  windowMs: number;
+}
+
+/**
+ * Default rate limiting rules and rationale for the indexer API.
+ */
+export const DEFAULT_RULES: Record<string, RateLimitRule> = {
+  /**
+   * Anonymous read limit (100 req/min).
+   *
+   * Rationale:
+   * Protects unauthenticated read endpoints (e.g. public posts, feeds, and profiles)
+   * from abusive web scraping and denial-of-service surges while ensuring casual
+   * visitors and unauthenticated mobile/web clients experience frictionless browsing.
+   */
+  anon: {
+    limit: RATE_LIMIT_ANON_RPM,
+    windowMs: WINDOW_MS,
+  },
+
+  /**
+   * Authenticated read limit (300 req/min).
+   *
+   * Rationale:
+   * Keyed by verified Stellar address (via cryptographic signature). Authenticated users
+   * are allocated higher throughput (3× the anon quota) to facilitate real-time polling,
+   * notification stream updates, follower queries, and interactive dashboard usage.
+   */
+  auth: {
+    limit: RATE_LIMIT_AUTH_RPM,
+    windowMs: WINDOW_MS,
+  },
+
+  /**
+   * Write endpoint limit (50 req/min).
+   *
+   * Rationale:
+   * Mutative endpoints (POST, PUT, DELETE, PATCH) involve heavier compute and database write
+   * overhead, including cryptographic signature verification and event bus propagation.
+   * A stricter 50 req/min cap prevents ledger queue flooding and database exhaustion.
+   */
+  write: {
+    limit: RATE_LIMIT_WRITE_RPM,
+    windowMs: WINDOW_MS,
+  },
+};
 
 // ── Store abstraction ─────────────────────────────────────────────────────────
 

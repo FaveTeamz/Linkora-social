@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { BlurhashImage } from "@/components/BlurhashImage";
 
 export interface Post {
   id: string | number;
@@ -11,7 +12,13 @@ export interface Post {
   like_count?: string | number;
   timestamp?: string | number;
   created_at?: string;
+  /** URL of an attached image. */
   imageUrl?: string;
+  /**
+   * Blurhash string for the attached image.
+   * Shown as a canvas placeholder while the image loads (no CLS).
+   */
+  blurhash?: string;
 }
 
 interface PostCardProps {
@@ -38,7 +45,7 @@ function highlightText(text: string, query = "") {
     part.toLowerCase() === trimmed.toLowerCase() ? (
       <mark
         key={`${part}-${index}`}
-        className="rounded bg-yellow-300 px-1 text-black font-semibold"
+        className="rounded bg-[color-mix(in_srgb,var(--color-warning)_35%,var(--background))] px-1 font-semibold text-foreground"
       >
         {part}
       </mark>
@@ -110,7 +117,7 @@ export function PostCard({
   }, [likeCount, previousLikeCount]);
 
   return (
-    <article className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3 md:p-4 lg:p-5 shadow-lg transition-all duration-300 hover:border-violet-500/40 hover:shadow-violet-950/10">
+    <article className="rounded-xl border border-border bg-background p-3 text-foreground shadow-lg transition-all duration-300 hover:border-[var(--color-primary)] md:p-4 lg:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-[var(--text-muted)]">
         <span
           className="font-medium hover:text-[var(--foreground)] transition-colors"
@@ -124,6 +131,19 @@ export function PostCard({
       <p className="whitespace-pre-wrap break-words leading-relaxed text-[var(--foreground)] mb-4 text-base">
         {highlightText(post.content, query)}
       </p>
+
+      {/* Attached image with blurhash placeholder */}
+      {post.imageUrl && (
+        <BlurhashImage
+          src={post.imageUrl}
+          alt="Post image"
+          blurhash={post.blurhash}
+          width={800}
+          height={450}
+          wrapperClassName="mb-4 rounded-lg overflow-hidden"
+          className="rounded-lg"
+        />
+      )}
 
       <div
         className="flex items-center gap-6 border-t border-[var(--border)]/40 pt-3"
@@ -165,19 +185,19 @@ export function PostCard({
 
 export function PostCardSkeleton() {
   return (
-    <div className="animate-pulse rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3 md:p-4 lg:p-5 space-y-4">
+    <div className="animate-pulse space-y-4 rounded-xl border border-border bg-background p-3 text-foreground md:p-4 lg:p-5">
       <div className="flex justify-between">
-        <div className="h-4 w-28 rounded bg-zinc-800" />
-        <div className="h-4 w-20 rounded bg-zinc-800" />
+        <div className="h-4 w-28 rounded bg-[var(--color-surface-2)]" />
+        <div className="h-4 w-20 rounded bg-[var(--color-surface-2)]" />
       </div>
       <div className="space-y-3">
-        <div className="h-4 w-full rounded bg-zinc-800" />
-        <div className="h-4 w-4/5 rounded bg-zinc-800" />
-        <div className="h-4 w-2/3 rounded bg-zinc-800" />
+        <div className="h-4 w-full rounded bg-[var(--color-surface-2)]" />
+        <div className="h-4 w-4/5 rounded bg-[var(--color-surface-2)]" />
+        <div className="h-4 w-2/3 rounded bg-[var(--color-surface-2)]" />
       </div>
       <div className="border-t border-[var(--border)]/40 pt-3 flex gap-6">
-        <div className="h-5 w-12 rounded bg-zinc-800" />
-        <div className="h-5 w-20 rounded bg-zinc-800" />
+        <div className="h-5 w-12 rounded bg-[var(--color-surface-2)]" />
+        <div className="h-5 w-20 rounded bg-[var(--color-surface-2)]" />
       </div>
     </div>
   );

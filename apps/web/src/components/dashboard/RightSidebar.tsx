@@ -16,14 +16,12 @@ const suggestedConnections = [
   { name: "Aria Chen", handle: "@ariachen" },
 ];
 
+/** All colour values use CSS custom properties from globals.css / tokens.css
+ *  so the dark/light toggle switches this sidebar correctly (Issue #171). */
 export function RightSidebar() {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(0);
 
-  // Creator-token price/volume backed by a module-level TTL cache. Because the
-  // cache reuses the previous value within the TTL, remounting this sidebar
-  // (dashboard navigation) does not trigger a fresh RPC call or a flash back to
-  // a loading state — preventing Cumulative Layout Shift.
   const [creatorToken, setCreatorToken] = useState<{
     price: string | null;
     volume24h: string | null;
@@ -54,8 +52,8 @@ export function RightSidebar() {
       style={{
         width: "320px",
         minWidth: "320px",
-        backgroundColor: "var(--bg-primary, #0B1120)",
-        borderLeft: "1px solid var(--border, #334155)",
+        backgroundColor: "var(--background)",
+        borderLeft: "1px solid var(--color-border)",
         padding: "20px 16px",
         display: "flex",
         flexDirection: "column",
@@ -79,9 +77,9 @@ export function RightSidebar() {
             width: "100%",
             padding: "10px 14px 10px 40px",
             borderRadius: "12px",
-            border: "1px solid var(--border, #334155)",
-            backgroundColor: "var(--bg-secondary, #1E293B)",
-            color: "var(--text-primary, #F8FAFC)",
+            border: "1px solid var(--color-border)",
+            backgroundColor: "var(--muted)",
+            color: "var(--foreground)",
             fontSize: "0.9rem",
             outline: "none",
             boxSizing: "border-box",
@@ -92,7 +90,7 @@ export function RightSidebar() {
           height="18"
           viewBox="0 0 24 24"
           fill="none"
-          stroke="var(--text-secondary, #94A3B8)"
+          stroke="var(--text-muted)"
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -106,9 +104,9 @@ export function RightSidebar() {
       {/* User Profile Card */}
       <div
         style={{
-          backgroundColor: "var(--bg-secondary, #1E293B)",
+          backgroundColor: "var(--muted)",
           borderRadius: "16px",
-          border: "1px solid var(--border, #334155)",
+          border: "1px solid var(--color-border)",
           padding: "16px",
           display: "flex",
           flexDirection: "column",
@@ -121,11 +119,11 @@ export function RightSidebar() {
               width: "48px",
               height: "48px",
               borderRadius: "50%",
-              backgroundColor: "#60A5FA",
+              backgroundColor: "var(--color-secondary)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#FFFFFF",
+              color: "var(--color-text-on-brand)",
               fontWeight: 700,
               fontSize: "1.1rem",
             }}
@@ -137,33 +135,31 @@ export function RightSidebar() {
               <h3
                 style={{
                   margin: 0,
-                  color: "var(--text-primary, #F8FAFC)",
+                  color: "var(--foreground)",
                   fontSize: "1rem",
                   fontWeight: 600,
                 }}
               >
                 Alex Rivera
               </h3>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="#60A5FA">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--color-secondary)">
                 <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
               </svg>
             </div>
-            <span style={{ color: "var(--text-secondary, #94A3B8)", fontSize: "0.85rem" }}>
-              @7CAI.326
-            </span>
+            <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>@7CAI.326</span>
           </div>
         </div>
 
         <p
           style={{
             margin: 0,
-            color: "var(--text-secondary, #94A3B8)",
+            color: "var(--text-muted)",
             fontSize: "0.85rem",
             lineHeight: 1.4,
           }}
         >
-          Building smart contracts & decentralized social graph on Stellar. Web3 builder & Soroban
-          enthusiast.
+          Building smart contracts &amp; decentralized social graph on Stellar. Web3 builder &amp;
+          Soroban enthusiast.
         </p>
 
         {/* Profile Stats */}
@@ -172,58 +168,35 @@ export function RightSidebar() {
             display: "flex",
             justifyContent: "space-between",
             padding: "8px 12px",
-            backgroundColor: "var(--bg-primary, #0B1120)",
+            backgroundColor: "var(--background)",
             borderRadius: "10px",
-            border: "1px solid var(--border, #334155)",
+            border: "1px solid var(--color-border)",
           }}
         >
-          <div style={{ textAlign: "center" }}>
-            <span
-              style={{
-                display: "block",
-                color: "var(--text-primary, #F8FAFC)",
-                fontWeight: 700,
-                fontSize: "0.95rem",
-              }}
-            >
-              1,420
-            </span>
-            <span style={{ color: "var(--text-secondary, #94A3B8)", fontSize: "0.75rem" }}>
-              Followers
-            </span>
-          </div>
-          <div style={{ width: "1px", backgroundColor: "var(--border, #334155)" }} />
-          <div style={{ textAlign: "center" }}>
-            <span
-              style={{
-                display: "block",
-                color: "var(--text-primary, #F8FAFC)",
-                fontWeight: 700,
-                fontSize: "0.95rem",
-              }}
-            >
-              385
-            </span>
-            <span style={{ color: "var(--text-secondary, #94A3B8)", fontSize: "0.75rem" }}>
-              Following
-            </span>
-          </div>
-          <div style={{ width: "1px", backgroundColor: "var(--border, #334155)" }} />
-          <div style={{ textAlign: "center" }}>
-            <span
-              style={{
-                display: "block",
-                color: "var(--text-primary, #F8FAFC)",
-                fontWeight: 700,
-                fontSize: "0.95rem",
-              }}
-            >
-              94
-            </span>
-            <span style={{ color: "var(--text-secondary, #94A3B8)", fontSize: "0.75rem" }}>
-              Posts
-            </span>
-          </div>
+          {[
+            { value: "1,420", label: "Followers" },
+            { value: "385", label: "Following" },
+            { value: "94", label: "Posts" },
+          ].map(({ value, label }, i, arr) => (
+            <React.Fragment key={label}>
+              <div style={{ textAlign: "center" }}>
+                <span
+                  style={{
+                    display: "block",
+                    color: "var(--foreground)",
+                    fontWeight: 700,
+                    fontSize: "0.95rem",
+                  }}
+                >
+                  {value}
+                </span>
+                <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{label}</span>
+              </div>
+              {i < arr.length - 1 && (
+                <div style={{ width: "1px", backgroundColor: "var(--color-border)" }} />
+              )}
+            </React.Fragment>
+          ))}
         </div>
 
         {/* Action Buttons */}
@@ -234,8 +207,8 @@ export function RightSidebar() {
               padding: "8px",
               borderRadius: "8px",
               border: "none",
-              backgroundColor: "var(--accent-primary, #60A5FA)",
-              color: "#FFFFFF",
+              backgroundColor: "var(--color-primary)",
+              color: "var(--color-text-on-brand)",
               fontWeight: 600,
               fontSize: "0.85rem",
               cursor: "pointer",
@@ -247,9 +220,9 @@ export function RightSidebar() {
             style={{
               padding: "8px 12px",
               borderRadius: "8px",
-              border: "1px solid var(--border, #334155)",
+              border: "1px solid var(--color-border)",
               backgroundColor: "transparent",
-              color: "var(--text-primary, #F8FAFC)",
+              color: "var(--foreground)",
               fontSize: "0.85rem",
               cursor: "pointer",
             }}
@@ -263,9 +236,9 @@ export function RightSidebar() {
       <div
         aria-label="Creator token price"
         style={{
-          backgroundColor: "var(--bg-secondary, #1E293B)",
+          backgroundColor: "var(--muted)",
           borderRadius: "16px",
-          border: "1px solid var(--border, #334155)",
+          border: "1px solid var(--color-border)",
           padding: "16px",
           minHeight: "112px",
           display: "flex",
@@ -278,7 +251,7 @@ export function RightSidebar() {
           <h3
             style={{
               margin: 0,
-              color: "var(--text-primary, #F8FAFC)",
+              color: "var(--foreground)",
               fontSize: "0.95rem",
               fontWeight: 700,
             }}
@@ -288,7 +261,7 @@ export function RightSidebar() {
           <span
             style={{
               fontSize: "0.7rem",
-              color: "var(--accent-primary, #60A5FA)",
+              color: "var(--color-primary)",
               fontWeight: 600,
             }}
           >
@@ -299,7 +272,7 @@ export function RightSidebar() {
           <span
             style={{
               display: "block",
-              color: "var(--text-primary, #F8FAFC)",
+              color: "var(--foreground)",
               fontWeight: 700,
               fontSize: "1.1rem",
               fontVariantNumeric: "tabular-nums",
@@ -310,7 +283,7 @@ export function RightSidebar() {
           <span
             style={{
               display: "block",
-              color: "var(--text-secondary, #94A3B8)",
+              color: "var(--text-muted)",
               fontSize: "0.75rem",
             }}
           >
@@ -322,9 +295,9 @@ export function RightSidebar() {
       {/* Trending Topic Section */}
       <div
         style={{
-          backgroundColor: "var(--bg-secondary, #1E293B)",
+          backgroundColor: "var(--muted)",
           borderRadius: "16px",
-          border: "1px solid var(--border, #334155)",
+          border: "1px solid var(--color-border)",
           padding: "16px",
           display: "flex",
           flexDirection: "column",
@@ -334,12 +307,12 @@ export function RightSidebar() {
         <h3
           style={{
             margin: 0,
-            color: "var(--text-primary, #F8FAFC)",
+            color: "var(--foreground)",
             fontSize: "0.95rem",
             fontWeight: 700,
           }}
         >
-          Trending Topic
+          Trending Topics
         </h3>
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           {trendingTopics.map((topic, idx) => (
@@ -351,22 +324,23 @@ export function RightSidebar() {
                 <span
                   style={{
                     display: "block",
-                    color: "var(--accent-primary, #60A5FA)",
+                    color: "var(--color-primary)",
                     fontWeight: 600,
                     fontSize: "0.85rem",
                   }}
                 >
                   {topic.tag}
                 </span>
-                <span style={{ color: "var(--text-secondary, #94A3B8)", fontSize: "0.75rem" }}>
+                <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
                   {topic.posts}
                 </span>
               </div>
               <button
+                aria-label={`More options for ${topic.tag}`}
                 style={{
                   border: "none",
                   background: "none",
-                  color: "var(--text-secondary, #94A3B8)",
+                  color: "var(--text-muted)",
                   cursor: "pointer",
                   padding: "4px",
                 }}
@@ -378,12 +352,12 @@ export function RightSidebar() {
         </div>
       </div>
 
-      {/* Sorgecte Connocticins (Suggested Connections) Section */}
+      {/* Suggested Connections Section */}
       <div
         style={{
-          backgroundColor: "var(--bg-secondary, #1E293B)",
+          backgroundColor: "var(--muted)",
           borderRadius: "16px",
-          border: "1px solid var(--border, #334155)",
+          border: "1px solid var(--color-border)",
           padding: "16px",
           display: "flex",
           flexDirection: "column",
@@ -393,12 +367,12 @@ export function RightSidebar() {
         <h3
           style={{
             margin: 0,
-            color: "var(--text-primary, #F8FAFC)",
+            color: "var(--foreground)",
             fontSize: "0.95rem",
             fontWeight: 700,
           }}
         >
-          Sorgecte Connocticins
+          Suggested Connections
         </h3>
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           {suggestedConnections.map((user, idx) => (
@@ -412,11 +386,11 @@ export function RightSidebar() {
                     width: "36px",
                     height: "36px",
                     borderRadius: "50%",
-                    backgroundColor: "#818CF8",
+                    backgroundColor: "var(--color-primary)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: "#FFF",
+                    color: "var(--color-text-on-brand)",
                     fontSize: "0.85rem",
                     fontWeight: 600,
                   }}
@@ -427,14 +401,14 @@ export function RightSidebar() {
                   <span
                     style={{
                       display: "block",
-                      color: "var(--text-primary, #F8FAFC)",
+                      color: "var(--foreground)",
                       fontWeight: 600,
                       fontSize: "0.85rem",
                     }}
                   >
                     {user.name}
                   </span>
-                  <span style={{ color: "var(--text-secondary, #94A3B8)", fontSize: "0.75rem" }}>
+                  <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
                     {user.handle}
                   </span>
                 </div>
@@ -443,9 +417,9 @@ export function RightSidebar() {
                 style={{
                   padding: "6px 12px",
                   borderRadius: "20px",
-                  border: "1px solid var(--accent-primary, #60A5FA)",
+                  border: "1px solid var(--color-primary)",
                   backgroundColor: "transparent",
-                  color: "var(--accent-primary, #60A5FA)",
+                  color: "var(--color-primary)",
                   fontSize: "0.75rem",
                   fontWeight: 600,
                   cursor: "pointer",
@@ -458,7 +432,7 @@ export function RightSidebar() {
         </div>
       </div>
 
-      {/* Pagination Dots at Bottom */}
+      {/* Pagination Dots */}
       <div
         style={{
           display: "flex",
@@ -480,9 +454,7 @@ export function RightSidebar() {
               borderRadius: "4px",
               border: "none",
               backgroundColor:
-                currentPage === dotIndex
-                  ? "var(--accent-primary, #60A5FA)"
-                  : "var(--border, #334155)",
+                currentPage === dotIndex ? "var(--color-primary)" : "var(--color-border)",
               cursor: "pointer",
               transition: "all 0.3s ease",
             }}

@@ -10,11 +10,10 @@ jest.mock("@/components/WalletProvider", () => ({
   useWalletContext: jest.fn(),
 }));
 
-const mockUseNotificationsContext =
-  useNotificationsContext as jest.MockedFunction<typeof useNotificationsContext>;
-const mockUseWalletContext = useWalletContext as jest.MockedFunction<
-  typeof useWalletContext
+const mockUseNotificationsContext = useNotificationsContext as jest.MockedFunction<
+  typeof useNotificationsContext
 >;
+const mockUseWalletContext = useWalletContext as jest.MockedFunction<typeof useWalletContext>;
 
 class FakeWebSocket {
   onopen: (() => void) | null = null;
@@ -37,8 +36,15 @@ beforeEach(() => {
     incrementUnread: jest.fn(),
     decrementUnread: jest.fn(),
     resetUnread: jest.fn(),
-    addNotification: jest.fn(),
+    inboxUnreadCount: 0,
+    actionNotifications: [],
+    addNotification: jest.fn().mockReturnValue("mock-id"),
     updateNotification: jest.fn(),
+    getNotification: jest.fn().mockReturnValue(undefined),
+    notifications: [],
+    hasMore: false,
+    markAllRead: jest.fn(),
+    loadMore: jest.fn(),
   });
 });
 
@@ -56,10 +62,7 @@ const ITEM = {
 };
 
 function seedUnread() {
-  window.localStorage.setItem(
-    `linkora:notifications:items:${ADDR}`,
-    JSON.stringify([ITEM])
-  );
+  window.localStorage.setItem(`linkora:notifications:items:${ADDR}`, JSON.stringify([ITEM]));
   window.localStorage.setItem("linkora:notifications:unread", "2");
 }
 

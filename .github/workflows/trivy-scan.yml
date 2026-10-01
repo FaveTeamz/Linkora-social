@@ -1,0 +1,87 @@
+name: Container Vulnerability Scan (Trivy)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  trivy-scan:
+    name: Trivy — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # required to upload SARIF results
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: indexer
+            context: services/indexer
+          - service: dm-relay
+            context: services/dm-relay
+          - service: analytics-oracle
+            context: services/analytics-oracle
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Build Docker image — ${{ matrix.service }}
+        run: |
+          docker build \
+            --tag linkora/${{ matrix.service }}:ci-${{ github.sha }} \
+            ${{ matrix.context }}
+
+      # ── Scan: fail CI on CRITICAL vulnerabilities ──────────────────────────
+      - name: Trivy scan — CRITICAL (fail on detection)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: linkora/${{ matrix.service }}:ci-${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL
+
+      # ── Scan: warn on HIGH vulnerabilities (no failure) ───────────────────
+      - name: Trivy scan — HIGH (warning only, upload SARIF)
+        if: always()   # run even when the CRITICAL step failed
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: linkora/${{ matrix.service }}:ci-${{ github.sha }}
+          format: sarif
+          output: trivy-${{ matrix.service }}-high.sarif
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH
+
+      # ── Upload SARIF to GitHub Security tab ───────────────────────────────
+      - name: Upload SARIF results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-${{ matrix.service }}-high.sarif
+          category: trivy-${{ matrix.service }}
+
+      # ── Upload full JSON report as CI artifact ─────────────────────────────
+      - name: Trivy scan — full JSON report (artifact)
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: linkora/${{ matrix.service }}:ci-${{ github.sha }}
+          format: json
+          output: trivy-${{ matrix.service }}-report.json
+          ignore-unfixed: false
+          vuln-type: os,library
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+
+      - name: Upload Trivy report artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-report-${{ matrix.service }}-${{ github.sha }}
+          path: trivy-${{ matrix.service }}-report.json
+          retention-days: 30

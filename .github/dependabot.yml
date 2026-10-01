@@ -15,10 +15,15 @@ updates:
     directories:
       - "/"
       - "/packages/sdk"
+      - "/packages/reputation"
+      - "/packages/analytics"
       - "/apps/web"
       - "/apps/mobile"
       - "/services/indexer"
       - "/services/dm-relay"
+      - "/services/notification"
+      - "/services/search"
+      - "/services/media"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10

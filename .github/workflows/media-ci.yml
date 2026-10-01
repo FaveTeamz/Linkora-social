@@ -1,0 +1,55 @@
+name: Media Service CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/media/**"
+      - ".github/workflows/media-ci.yml"
+  pull_request:
+    paths:
+      - "services/media/**"
+      - ".github/workflows/media-ci.yml"
+
+jobs:
+  media-ci:
+    name: Media Service — Lint, Type-check, Test & Docker Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Sharp build step
+        run: |
+          pnpm --filter @linkora/media run build:sharp || true
+
+      - name: Lint
+        working-directory: services/media
+        run: pnpm run lint
+
+      - name: Type-check
+        working-directory: services/media
+        run: pnpm run typecheck
+
+      - name: Test
+        working-directory: services/media
+        run: pnpm run test
+
+      - name: Validate Dockerfile builds successfully
+        run: docker build -t linkora-media:ci ./services/media

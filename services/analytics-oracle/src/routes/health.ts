@@ -3,8 +3,10 @@
  *
  * - /health          aggregate status, including degraded modes
  * - /health/live     always 200 while the process is running
- * - /health/ready    200 when downstream dependencies (DB, Stellar RPC) are healthy
- * - /health/startup  200 once initial bootstrap (first analytics window) has completed
+ * - /health/ready    200 when downstream dependencies (DB, Stellar RPC, Redis)
+ *                    are healthy
+ * - /health/startup  200 once initial bootstrap (first analytics window) has
+ *                    completed
  *
  * `rateLimiter` reports which store backs the limiter. `shared: false` means
  * limits are enforced per replica, so a scaled deployment's effective limit is
@@ -26,6 +28,9 @@ const DB_SLOW_THRESHOLD_MS = 1_000;
 /** Hard timeout for the database health check query in ms. */
 const DB_HEALTH_TIMEOUT_MS = 5_000;
 
+/** Hard timeout for the Redis PING in ms. */
+const REDIS_HEALTH_TIMEOUT_MS = 3_000;
+
 interface DependencyCheck {
   status: "up" | "down";
   latencyMs: number;
@@ -39,6 +44,10 @@ export interface HealthDeps {
   isStarted: () => boolean;
   startedAt: () => string | null;
   isShuttingDown: () => boolean;
+  /** Redis URL for connection health check (optional — omitted when not configured). */
+  redisUrl?: string;
+  /** Service version — defaults to npm_package_version. */
+  version?: string;
   /** Injectable for tests; defaults to the module-level limiter singleton. */
   rateLimitStatus?: () => RateLimitStoreStatus;
 }
@@ -113,9 +122,46 @@ async function checkStellarRpc(rpcUrl: string): Promise<DependencyCheck> {
   }
 }
 
+/**
+ * Ping Redis by issuing a PING command via a short-lived ioredis connection.
+ * We create a one-shot client rather than reusing the rate-limit client so
+ * the health endpoint remains independent of the limiter's lifecycle.
+ */
+async function checkRedis(redisUrl: string): Promise<DependencyCheck> {
+  const start = Date.now();
+  let client: import("ioredis").Redis | null = null;
+  try {
+    const { default: Redis } = await import("ioredis");
+    client = new Redis(redisUrl, {
+      connectTimeout: REDIS_HEALTH_TIMEOUT_MS,
+      maxRetriesPerRequest: 0,
+      enableReadyCheck: false,
+      lazyConnect: true,
+    });
+    await client.connect();
+    await client.ping();
+    return { status: "up", latencyMs: Date.now() - start };
+  } catch (err: unknown) {
+    return {
+      status: "down",
+      latencyMs: Date.now() - start,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    if (client) {
+      try {
+        await client.quit();
+      } catch {
+        // ignore disconnect errors on health-check clients
+      }
+    }
+  }
+}
+
 export function createHealthRouter(deps: HealthDeps): Router {
   const router = Router();
   const rateLimitStatus = deps.rateLimitStatus ?? getRateLimitStoreStatus;
+  const version = deps.version ?? process.env["npm_package_version"] ?? "0.1.0";
 
   router.get("/health", async (_req, res) => {
     const uptime = Math.floor((Date.now() - deps.startTime) / 1000);
@@ -125,34 +171,46 @@ export function createHealthRouter(deps: HealthDeps): Router {
       res.status(503).json({
         status: "degraded",
         uptime,
+        version,
         rateLimiter,
         checks: {
           database: { status: "down", latencyMs: 0 },
           stellar_rpc: { status: "down", latencyMs: 0 },
+          ...(deps.redisUrl ? { redis: { status: "down", latencyMs: 0 } } : {}),
         },
       });
       return;
     }
 
-    const [database, stellar_rpc] = await Promise.all([
+    const [database, stellar_rpc, redis] = await Promise.all([
       checkDatabase(deps.db),
       checkStellarRpc(deps.rpcUrl),
+      deps.redisUrl ? checkRedis(deps.redisUrl) : Promise.resolve(undefined),
     ]);
 
-    const healthy = database.status === "up" && stellar_rpc.status === "up";
+    const healthy =
+      database.status === "up" &&
+      stellar_rpc.status === "up" &&
+      (!redis || redis.status === "up");
+
     const status = healthy ? (rateLimiter.shared ? "ok" : "degraded") : "degraded";
 
     res.status(healthy ? 200 : 503).json({
       status,
       uptime,
+      version,
       rateLimiter,
-      checks: { database, stellar_rpc },
+      checks: {
+        database,
+        stellar_rpc,
+        ...(redis ? { redis } : {}),
+      },
     });
   });
 
   router.get("/health/live", (_req, res) => {
     const uptime = Math.floor((Date.now() - deps.startTime) / 1000);
-    res.json({ status: "alive", uptime });
+    res.json({ status: "alive", uptime, version });
   });
 
   router.get("/health/ready", async (_req, res) => {
@@ -165,28 +223,39 @@ export function createHealthRouter(deps: HealthDeps): Router {
         checks: {
           database: { status: "down", latencyMs: 0 },
           stellar_rpc: { status: "down", latencyMs: 0 },
+          ...(deps.redisUrl ? { redis: { status: "down", latencyMs: 0 } } : {}),
           rateLimiter,
         },
       });
       return;
     }
 
-    const [database, stellar_rpc] = await Promise.all([
+    const [database, stellar_rpc, redis] = await Promise.all([
       checkDatabase(deps.db),
       checkStellarRpc(deps.rpcUrl),
+      deps.redisUrl ? checkRedis(deps.redisUrl) : Promise.resolve(undefined),
     ]);
 
-    const ready = database.status === "up" && stellar_rpc.status === "up";
+    const ready =
+      database.status === "up" &&
+      stellar_rpc.status === "up" &&
+      (!redis || redis.status === "up");
+
     res.status(ready ? 200 : 503).json({
       status: ready ? "ready" : "not_ready",
       degraded: !rateLimiter.shared,
-      checks: { database, stellar_rpc, rateLimiter },
+      checks: {
+        database,
+        stellar_rpc,
+        ...(redis ? { redis } : {}),
+        rateLimiter,
+      },
     });
   });
 
   router.get("/health/startup", (_req, res) => {
     if (deps.isStarted()) {
-      res.json({ status: "started", startedAt: deps.startedAt() });
+      res.json({ status: "started", startedAt: deps.startedAt(), version });
     } else {
       res.status(503).json({ status: "starting" });
     }

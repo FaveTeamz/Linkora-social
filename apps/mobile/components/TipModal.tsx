@@ -13,6 +13,7 @@ import {
 
 import { useTip, type TipToken } from "../hooks/useTip";
 import { useTheme } from "../theme/useTheme";
+import { FeeTooltip } from "./FeeTooltip";
 
 const SUPPORTED_TOKENS: TipToken[] = [
   {
@@ -118,7 +119,10 @@ export function TipModal({ visible, postId, authorName, onClose }: TipModalProps
             })}
           </View>
 
-          <Text style={styles.fieldLabel}>Amount</Text>
+          <View style={styles.amountLabelRow}>
+            <Text style={[styles.fieldLabel, { marginBottom: 0 }]}>Amount</Text>
+            <FeeTooltip feeBps={100} />
+          </View>
           <View style={styles.inputWrap}>
             <TextInput
               accessibilityLabel="Tip amount"
@@ -236,6 +240,13 @@ function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
       letterSpacing: 0.6,
       marginBottom: 8,
       textTransform: "uppercase",
+    },
+    amountLabelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: 8,
+      gap: 4,
+      // Override fieldLabel's own marginBottom so only the row margin applies
     },
     tokenRow: {
       flexDirection: "row",

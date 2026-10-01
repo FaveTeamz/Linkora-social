@@ -2,6 +2,70 @@
 
 import React, { useState } from "react";
 
+// ── Stat Card Skeleton ───────────────────────────────────────────────────────
+// A single stat card skeleton whose dimensions match the real card exactly.
+// The `animationDelay` prop creates a stagger effect so cards animate in one
+// by one instead of all at once, avoiding a jarring block-flash (CLS).
+interface StatCardSkeletonProps {
+  /** Stagger delay in milliseconds so cards animate in one after another */
+  animationDelay?: number;
+}
+
+export function StatCardSkeleton({ animationDelay = 0 }: StatCardSkeletonProps) {
+  return (
+    <div
+      role="status"
+      aria-label="Loading stat card"
+      className="skeleton-stat-card"
+      style={{
+        backgroundColor: "var(--bg-card, #1E293B)",
+        borderRadius: "16px",
+        border: "1px solid var(--border, #334155)",
+        padding: "20px",
+        marginBottom: "20px",
+        breakInside: "avoid",
+        /* Fixed min-height matching real card to prevent CLS */
+        minHeight: "140px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+        /* Fade-in animation with stagger delay */
+        animation: "statCardFadeIn 0.35s ease forwards",
+        animationDelay: `${animationDelay}ms`,
+        opacity: 0,
+      }}
+    >
+      {/* Author row */}
+      <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+        <div className="skeleton-avatar" />
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: 1 }}>
+          <div className="skeleton-line" style={{ width: "40%" }} />
+          <div className="skeleton-line" style={{ width: "25%", height: "10px" }} />
+        </div>
+      </div>
+      {/* Content lines */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <div className="skeleton-line" style={{ width: "90%" }} />
+        <div className="skeleton-line" style={{ width: "80%" }} />
+        <div className="skeleton-line" style={{ width: "60%" }} />
+      </div>
+      {/* Footer action row */}
+      <div
+        style={{
+          display: "flex",
+          gap: "16px",
+          paddingTop: "12px",
+          borderTop: "1px solid var(--border, #334155)",
+        }}
+      >
+        <div className="skeleton-line" style={{ width: "48px", height: "16px" }} />
+        <div className="skeleton-line" style={{ width: "48px", height: "16px" }} />
+        <div className="skeleton-line" style={{ width: "48px", height: "16px" }} />
+      </div>
+    </div>
+  );
+}
+
 export interface PostItem {
   id: string;
   author: string;
@@ -120,23 +184,11 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
   if (isLoading) {
     return (
       <div className="dashboard-masonry-grid" style={{ padding: "24px" }}>
-        {[1, 2, 3, 4, 5, 6].map((idx) => (
-          <div key={idx} className="dashboard-post-card skeleton-card">
-            <div
-              style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "14px" }}
-            >
-              <div className="skeleton-avatar" />
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: 1 }}>
-                <div className="skeleton-line" style={{ width: "40%" }} />
-                <div className="skeleton-line" style={{ width: "25%" }} />
-              </div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <div className="skeleton-line" style={{ width: "90%" }} />
-              <div className="skeleton-line" style={{ width: "80%" }} />
-              <div className="skeleton-line" style={{ width: "60%" }} />
-            </div>
-          </div>
+        {[0, 1, 2, 3, 4, 5].map((idx) => (
+          <StatCardSkeleton
+            key={idx}
+            animationDelay={idx * 80}
+          />
         ))}
       </div>
     );
@@ -153,9 +205,9 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
             key={post.id}
             className="dashboard-post-card"
             style={{
-              backgroundColor: "var(--bg-card, #1E293B)",
+              backgroundColor: "var(--background)",
               borderRadius: "16px",
-              border: "1px solid var(--border, #334155)",
+              border: "1px solid var(--color-border)",
               padding: "20px",
               marginBottom: "20px",
               breakInside: "avoid",
@@ -193,7 +245,7 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
                   <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                     <span
                       style={{
-                        color: "var(--text-primary, #F8FAFC)",
+                        color: "var(--foreground)",
                         fontWeight: 700,
                         fontSize: "0.95rem",
                       }}
@@ -205,18 +257,18 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
                         width="16"
                         height="16"
                         viewBox="0 0 24 24"
-                        fill="var(--accent-primary, #60A5FA)"
+                        fill="var(--color-secondary)"
                       >
                         <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
                       </svg>
                     )}
                   </div>
                   <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                    <span style={{ color: "var(--text-secondary, #94A3B8)", fontSize: "0.8rem" }}>
+                    <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
                       {post.handle}
                     </span>
-                    <span style={{ color: "var(--border, #334155)" }}>•</span>
-                    <span style={{ color: "var(--text-secondary, #94A3B8)", fontSize: "0.8rem" }}>
+                    <span style={{ color: "var(--color-border)" }}>•</span>
+                    <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
                       {post.time}
                     </span>
                   </div>
@@ -229,7 +281,7 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
                 style={{
                   border: "none",
                   background: "transparent",
-                  color: "var(--text-secondary, #94A3B8)",
+                  color: "var(--text-muted)",
                   cursor: "pointer",
                   padding: "4px 8px",
                   borderRadius: "6px",
@@ -244,7 +296,7 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
             <p
               style={{
                 margin: "0 0 16px 0",
-                color: "var(--text-primary, #F8FAFC)",
+                color: "var(--foreground)",
                 fontSize: "0.95rem",
                 lineHeight: 1.5,
               }}
@@ -259,7 +311,7 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
                 justifyContent: "space-between",
                 alignItems: "center",
                 paddingTop: "12px",
-                borderTop: "1px solid var(--border, #334155)",
+                borderTop: "1px solid var(--color-border)",
               }}
             >
               <button
@@ -271,7 +323,7 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
                   gap: "6px",
                   border: "none",
                   background: "transparent",
-                  color: isLiked ? "#EF4444" : "var(--text-secondary, #94A3B8)",
+                  color: isLiked ? "var(--color-error)" : "var(--text-muted)",
                   fontSize: "0.85rem",
                   fontWeight: 500,
                   cursor: "pointer",
@@ -282,8 +334,8 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
                   width="18"
                   height="18"
                   viewBox="0 0 24 24"
-                  fill={isLiked ? "#EF4444" : "none"}
-                  stroke={isLiked ? "#EF4444" : "currentColor"}
+                  fill={isLiked ? "var(--color-error)" : "none"}
+                  stroke={isLiked ? "var(--color-error)" : "currentColor"}
                   strokeWidth="2"
                 >
                   <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
@@ -299,7 +351,7 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
                   gap: "6px",
                   border: "none",
                   background: "transparent",
-                  color: "var(--text-secondary, #94A3B8)",
+                  color: "var(--text-muted)",
                   fontSize: "0.85rem",
                   fontWeight: 500,
                   cursor: "pointer",
@@ -326,7 +378,7 @@ export function DashboardPostGrid({ isLoading = false }: DashboardPostGridProps)
                   gap: "6px",
                   border: "none",
                   background: "transparent",
-                  color: "var(--text-secondary, #94A3B8)",
+                  color: "var(--text-muted)",
                   fontSize: "0.85rem",
                   fontWeight: 500,
                   cursor: "pointer",
