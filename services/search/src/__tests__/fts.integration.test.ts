@@ -1,66 +1,74 @@
-import { query, closeDbPool } from "../db";
+import { getDbPool, closeDbPool } from "../db";
+import type { PoolClient } from "pg";
 
 describe("PostgreSQL Full-Text Search (FTS) Integration", () => {
-  let isDbAvailable = false;
+  let client: PoolClient | undefined;
 
   beforeAll(async () => {
     try {
-      const res = await query("SELECT 1 AS connected");
-      isDbAvailable = res.rows[0]?.connected === 1;
-
-      if (isDbAvailable) {
-        // Setup temporary search test table with tsvector column
-        await query(`
-          CREATE TABLE IF NOT EXISTS test_posts (
-            id SERIAL PRIMARY KEY,
-            content TEXT NOT NULL,
-            tsv TSVECTOR
-          );
-        `);
-
-        await query(`
-          INSERT INTO test_posts (content, tsv) VALUES
-          ('Building decentralized applications on Stellar and Soroban', to_tsvector('english', 'Building decentralized applications on Stellar and Soroban')),
-          ('Linkora social protocol integrates on-chain tipping primitives', to_tsvector('english', 'Linkora social protocol integrates on-chain tipping primitives')),
-          ('Exploring web3 smart contracts in Rust', to_tsvector('english', 'Exploring web3 smart contracts in Rust'));
-        `);
-      }
+      client = await getDbPool().connect();
+      await client.query(`
+        CREATE TEMP TABLE search_test_posts (
+          id TEXT PRIMARY KEY,
+          content TEXT NOT NULL,
+          document TSVECTOR NOT NULL
+        ) ON COMMIT PRESERVE ROWS
+      `);
+      await client.query(`
+        INSERT INTO search_test_posts (id, content, document) VALUES
+          ('exact', 'stellar', to_tsvector('english', 'stellar')),
+          ('partial', 'stellar social protocol and community', to_tsvector('english', 'stellar social protocol and community')),
+          ('unrelated', 'decentralized finance on another network', to_tsvector('english', 'decentralized finance on another network'))
+      `);
     } catch {
-      isDbAvailable = false;
+      client?.release();
+      client = undefined;
     }
   });
 
   afterAll(async () => {
-    if (isDbAvailable) {
-      try {
-        await query("DROP TABLE IF EXISTS test_posts");
-      } catch {
-        // ignore cleanup error
-      }
-    }
+    client?.release();
     await closeDbPool();
   });
 
-  it("performs full-text search and computes ts_rank when PostgreSQL is available", async () => {
-    if (!isDbAvailable) {
-      console.warn("PostgreSQL container not reachable; skipping live FTS query test.");
+  it("indexes and finds a post by a term in its content", async () => {
+    if (!client) {
+      console.warn("PostgreSQL test service is unavailable; skipping live FTS coverage.");
       return;
     }
 
-    const searchQuery = "Stellar & Soroban";
-    const res = await query<{ id: number; content: string; rank: number }>(
-      `
-      SELECT id, content, ts_rank(tsv, to_tsquery('english', $1)) AS rank
-      FROM test_posts
-      WHERE tsv @@ to_tsquery('english', $1)
-      ORDER BY rank DESC;
-      `,
-      [searchQuery]
+    const result = await client.query<{ id: string; content: string }>(
+      `SELECT id, content FROM search_test_posts WHERE document @@ plainto_tsquery('english', $1)`,
+      ["stellar"],
     );
+    expect(result.rows.map((row) => row.id)).toEqual(expect.arrayContaining(["exact", "partial"]));
+  });
 
-    expect(res.rows.length).toBeGreaterThanOrEqual(1);
-    // rows[0] is asserted to exist by the length check above
-    expect(res.rows[0]!.content).toContain("Stellar");
-    expect(Number(res.rows[0]!.rank)).toBeGreaterThan(0);
+  it("removes a deleted post from subsequent search results", async () => {
+    if (!client) return;
+    await client.query("DELETE FROM search_test_posts WHERE id = $1", ["exact"]);
+    const result = await client.query<{ id: string }>(
+      `SELECT id FROM search_test_posts WHERE document @@ plainto_tsquery('english', $1)`,
+      ["stellar"],
+    );
+    expect(result.rows.map((row) => row.id)).not.toContain("exact");
+  });
+
+  it("ranks the exact short match above a longer partial match", async () => {
+    if (!client) return;
+    await client.query(
+      `INSERT INTO search_test_posts (id, content, document)
+       VALUES ('exact', 'stellar', to_tsvector('english', 'stellar'))
+       ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, document = EXCLUDED.document`,
+    );
+    const result = await client.query<{ id: string; rank: number }>(
+      `SELECT id, ts_rank(document, plainto_tsquery('english', $1), 2) AS rank
+       FROM search_test_posts
+       WHERE document @@ plainto_tsquery('english', $1)
+       ORDER BY rank DESC`,
+      ["stellar"],
+    );
+    expect(result.rows[0]?.id).toBe("exact");
+    expect(Number(result.rows[0]?.rank)).toBeGreaterThan(Number(result.rows[1]?.rank));
   });
 });

@@ -52,4 +52,29 @@ describe("Notification Dispatcher", () => {
     expect(pushResult?.attempts).toBe(3);
     expect(inAppResult?.success).toBe(true);
   });
+
+  it("emits one structured log record for each delivery attempt", async () => {
+    await setUserPreferences({
+      userAddress: dummyPayload.recipient,
+      channels: { push: true, email: false, inApp: false },
+    });
+    const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const sender: ChannelSender = { send: jest.fn().mockResolvedValue(undefined) };
+
+    try {
+      await dispatch(dummyPayload, sender);
+      expect(log).toHaveBeenCalledTimes(1);
+      const record = JSON.parse(String(log.mock.calls[0]?.[0]));
+      expect(record).toMatchObject({
+        level: "info",
+        event: "notification_dispatch_attempt",
+        notificationId: dummyPayload.id,
+        recipient: dummyPayload.recipient,
+        channel: "push",
+        attempt: 1,
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
 });
