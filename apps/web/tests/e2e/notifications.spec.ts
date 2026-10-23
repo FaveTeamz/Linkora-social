@@ -173,6 +173,14 @@ test.describe("Notifications page", () => {
 
     await page.getByTestId("mark-all-read").click();
     await expect(page.getByTestId("mark-all-read")).not.toBeVisible();
+    const items = page.getByTestId("notification-item");
+    await expect(items).toHaveCount(3);
+    for (const item of await items.all()) {
+      await expect(item).toHaveClass(/bg-\[var\(--muted\)\]\/40/);
+      await expect(item.locator("span[aria-hidden='true']")).toHaveClass(/bg-transparent/);
+    }
+    await page.goto("/feed");
+    await expect(page.getByTestId("unread-badge")).toHaveCount(0);
   });
 
   test("new follow notification appears without page reload via seeded localStorage", async ({

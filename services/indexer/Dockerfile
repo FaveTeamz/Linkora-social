@@ -18,6 +18,7 @@ COPY packages/codegen/package.json packages/codegen/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/sdk/package.json packages/sdk/
 COPY packages/types/package.json packages/types/
+COPY packages/reputation/package.json packages/reputation/
 COPY services/analytics-oracle/package.json services/analytics-oracle/
 COPY services/dm-relay/package.json services/dm-relay/
 COPY services/indexer/package.json services/indexer/
@@ -25,6 +26,7 @@ COPY services/indexer/package.json services/indexer/
 RUN pnpm install --frozen-lockfile --filter "@linkora/indexer..."
 
 COPY packages/types ./packages/types
+COPY packages/reputation ./packages/reputation
 COPY services/indexer ./services/indexer
 
 RUN addgroup -g 1001 -S appgroup && \

@@ -58,13 +58,14 @@ describe("governance API", () => {
         ],
         total: 1,
       }),
+      getGovernanceProposal: jest.fn().mockResolvedValue(null),
     } as unknown as jest.Mocked<Database>;
   });
 
   it("lists proposals with default limit and offset", async () => {
     const res = await getProposals({}, db);
 
-    expect(db.listGovernanceProposals).toHaveBeenCalledWith({ limit: 20, offset: 0 });
+    expect(db.listGovernanceProposals).toHaveBeenCalledWith({ limit: 20, offset: 0, status: undefined });
     expect(res.json).toHaveBeenCalledWith({
       proposals: [
         {
@@ -83,13 +84,18 @@ describe("governance API", () => {
       limit: 20,
       offset: 0,
       has_more: false,
+      next_cursor: null,
     });
   });
 
   it("lists proposals with custom limit and offset", async () => {
     const res = await getProposals({ limit: "5", offset: "10" }, db);
 
-    expect(db.listGovernanceProposals).toHaveBeenCalledWith({ limit: 5, offset: 10 });
+    expect(db.listGovernanceProposals).toHaveBeenCalledWith({
+      limit: 5,
+      offset: 10,
+      status: undefined,
+    });
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         limit: 5,
@@ -104,5 +110,27 @@ describe("governance API", () => {
 
     const res2 = await getProposals({ offset: "abc" }, db);
     expect(res2.status).toHaveBeenCalledWith(400);
+  });
+
+  it("supports status filtering and numeric cursor pagination", async () => {
+    const res = await getProposals({ limit: "5", cursor: "10", status: "Active" }, db);
+    expect(db.listGovernanceProposals).toHaveBeenCalledWith({
+      limit: 5,
+      offset: 10,
+      status: "Active",
+    });
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ next_cursor: null, offset: 10 })
+    );
+  });
+
+  it("rejects malformed proposal IDs and returns 404 for unknown IDs", async () => {
+    const router = createGovernanceRouter(db);
+    const malformed = await invokeRoute(router, "/proposals/:id", { params: { id: "0" } });
+    expect(malformed.status).toHaveBeenCalledWith(400);
+
+    const missing = await invokeRoute(router, "/proposals/:id", { params: { id: "99" } });
+    expect(db.getGovernanceProposal).toHaveBeenCalledWith(99n);
+    expect(missing.status).toHaveBeenCalledWith(404);
   });
 });

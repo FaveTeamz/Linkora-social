@@ -13,6 +13,8 @@ export interface TransactionConfig {
   contractId: string;
   rpcUrl: string;
   networkPassphrase: string;
+  /** Explicit opt-in for a loopback-only local RPC endpoint. */
+  allowHttp?: boolean;
 }
 
 export interface TransactionResult {
@@ -53,7 +55,7 @@ export async function signAndSubmitTransaction(
   timeout: number = 30000
 ): Promise<TransactionResult> {
   const { rpcUrl, networkPassphrase } = config;
-  const server = new StellarRpc.Server(rpcUrl);
+  const server = new StellarRpc.Server(rpcUrl, { allowHttp: config.allowHttp ?? false });
 
   // Sign the transaction with Freighter
   const signedXdr = await signTransaction(xdr, {
@@ -130,7 +132,7 @@ export async function buildSignAndSubmit(
   timeout: number = 30000
 ): Promise<TransactionResult> {
   const { contractId, rpcUrl, networkPassphrase } = config;
-  const server = new StellarRpc.Server(rpcUrl);
+  const server = new StellarRpc.Server(rpcUrl, { allowHttp: config.allowHttp ?? false });
 
   // Get the source account
   const account = await server.getAccount(sourceAddress);

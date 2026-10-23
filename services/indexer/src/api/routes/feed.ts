@@ -6,6 +6,7 @@ import { getFeedPosts } from "../../handlers/post";
 import { validateParams, validateQuery } from "../../middleware/validate";
 import { z } from "zod";
 import { stellarAddressSchema, cursorPaginationSchema } from "@linkora/types/src/schemas";
+import { feedCacheKey, QueryCache } from "../../cache";
 
 const exploreQuerySchema = cursorPaginationSchema.extend({
   cursor: z.coerce.number().optional(),
@@ -43,7 +44,7 @@ function isPgPool(target: Database | Pool): target is Pool {
   return "query" in target && typeof (target as Pool).query === "function";
 }
 
-export function createFeedRouter(dbOrPg: Database | Pool): Router {
+export function createFeedRouter(dbOrPg: Database | Pool, cache?: QueryCache): Router {
   const router = Router();
 
   router.get("/", async (req: Request, res: Response): Promise<void> => {
@@ -53,48 +54,52 @@ export function createFeedRouter(dbOrPg: Database | Pool): Router {
     const rawLimit = Number.isNaN(limit) ? 20 : limit;
     const rawOffset = Number.isNaN(offset) ? 0 : offset;
 
-    if (isPgPool(dbOrPg)) {
-      const posts = await getFeedPosts(dbOrPg, {
-        viewerAddress: viewer,
+    const loadFeed = async (): Promise<Record<string, unknown>> => {
+      if (isPgPool(dbOrPg)) {
+        const posts = await getFeedPosts(dbOrPg, {
+          viewerAddress: viewer,
+          limit: rawLimit,
+          offset: rawOffset,
+        });
+        return {
+          posts,
+          total: posts.length,
+          limit: rawLimit,
+          offset: rawOffset,
+          has_more: posts.length === rawLimit,
+        };
+      }
+
+      const db = dbOrPg as Database;
+      if (db.getFeed) {
+        const { posts, total } = await db.getFeed({ viewer, limit: rawLimit, offset: rawOffset });
+        return {
+          posts,
+          total,
+          limit: rawLimit,
+          offset: rawOffset,
+          has_more: rawOffset + posts.length < total,
+        };
+      }
+
+      const blockedRes = viewer ? await db.getBlockedUsers(viewer, 1000, 0) : { blocked: [] };
+      const blockedSet = new Set(blockedRes.blocked);
+      const { posts, total } = await db.listPosts({ limit: rawLimit * 2, offset: rawOffset });
+      const filteredPosts = posts.filter((p) => !blockedSet.has(p.author)).slice(0, rawLimit);
+      return {
+        posts: filteredPosts,
+        total: Math.max(0, total - blockedSet.size),
         limit: rawLimit,
         offset: rawOffset,
-      });
-      res.json({
-        posts,
-        total: posts.length,
-        limit: rawLimit,
-        offset: rawOffset,
-        has_more: posts.length === rawLimit,
-      });
-      return;
-    }
+        has_more: rawOffset + filteredPosts.length < total,
+      };
+    };
 
-    const db = dbOrPg as Database;
-    if (db.getFeed) {
-      const { posts, total } = await db.getFeed({ viewer, limit: rawLimit, offset: rawOffset });
-      res.json({
-        posts,
-        total,
-        limit: rawLimit,
-        offset: rawOffset,
-        has_more: rawOffset + posts.length < total,
-      });
-      return;
-    }
-
-    const blockedRes = viewer ? await db.getBlockedUsers(viewer, 1000, 0) : { blocked: [] };
-    const blockedSet = new Set(blockedRes.blocked);
-
-    const { posts, total } = await db.listPosts({ limit: rawLimit * 2, offset: rawOffset });
-    const filteredPosts = posts.filter((p) => !blockedSet.has(p.author)).slice(0, rawLimit);
-
-    res.json({
-      posts: filteredPosts,
-      total: Math.max(0, total - blockedSet.size),
-      limit: rawLimit,
-      offset: rawOffset,
-      has_more: rawOffset + filteredPosts.length < total,
-    });
+    const filter = `viewer=${viewer ?? "all"}:limit=${rawLimit}`;
+    const response = cache
+      ? await cache.getOrLoad(feedCacheKey(filter, rawOffset), 10, loadFeed)
+      : await loadFeed();
+    res.json(response);
   });
 
   router.get(
@@ -165,7 +170,9 @@ export function createFeedRouter(dbOrPg: Database | Pool): Router {
     validateQuery(followingFeedQuerySchema),
     async (req: Request, res: Response): Promise<void> => {
       const address = req.params.address;
-      const { limit, cursor, tag } = req.query as unknown as z.infer<typeof followingFeedQuerySchema>;
+      const { limit, cursor, tag } = req.query as unknown as z.infer<
+        typeof followingFeedQuerySchema
+      >;
 
       if (!isPgPool(dbOrPg)) {
         const { posts } = await (dbOrPg as Database).listPosts({ limit, offset: 0 });

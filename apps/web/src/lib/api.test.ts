@@ -11,7 +11,7 @@ jest.mock("../../../../packages/sdk/src/client", () => ({
   LinkoraClient: jest.fn(),
 }));
 
-import { createTtlCache } from "./api";
+import { createTtlCache, uploadMediaFile } from "./api";
 
 describe("createTtlCache (creator-token price cache, #1208)", () => {
   beforeEach(() => {
@@ -90,5 +90,36 @@ describe("createTtlCache (creator-token price cache, #1208)", () => {
 
     expect(second.price).toBe("3.00");
     expect(load).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("uploadMediaFile", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it("posts the selected file as multipart form data to the media endpoint", async () => {
+    const file = new File(["image-bytes"], "photo.png", { type: "image/png" });
+    const fetchMock = jest
+      .spyOn(global, "fetch")
+      .mockResolvedValue(
+        {
+          ok: true,
+          status: 200,
+          json: async () => ({ url: "https://cdn.example/photo.png", size: file.size }),
+        } as Response
+      );
+
+    await expect(uploadMediaFile(file)).resolves.toEqual({
+      url: "https://cdn.example/photo.png",
+      size: file.size,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/api\/posts\/media$/);
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBeInstanceOf(FormData);
+    const uploaded = (init?.body as FormData).get("file") as File;
+    expect(uploaded.name).toBe("photo.png");
+    expect(uploaded.type).toBe("image/png");
   });
 });

@@ -5,7 +5,11 @@ use crate::test::{
     credential_authority_pubkey, credential_authority_signing_key, sign_credential_root,
 };
 use crate::*;
-use soroban_sdk::{testutils::Address as _, vec, Address, BytesN, Env, String, Vec};
+use proptest::prelude::*;
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    vec, Address, BytesN, Env, String, Vec,
+};
 
 /// Credential subsystem invariant tests
 /// These tests verify that the credential subsystem maintains
@@ -143,6 +147,63 @@ fn test_invariant_user_root_isolation() {
     assert_eq!(client.get_credential_root(&user1).unwrap(), new_root1);
     assert_eq!(client.get_credential_root(&user2).unwrap(), root2);
     assert_eq!(client.get_credential_root(&user3).unwrap(), root3);
+}
+
+#[test]
+fn invariant_reputation_score_never_becomes_negative() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = crate::test::setup_contract(&env);
+    let user = Address::generate(&env);
+
+    for delta in [25, -100, 10_000, -1, i64::MIN, 75, -50] {
+        let score = client.update_reputation_score(&admin, &user, &delta);
+        assert!(score >= 0);
+        assert!(client.get_reputation_score(&user) >= 0);
+    }
+}
+
+#[test]
+fn property_reputation_decay_converges_without_underflow() {
+    const DECAY_WINDOW: u32 = 17_280;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = crate::test::setup_contract(&env);
+    let user = Address::generate(&env);
+    client.update_reputation_score(&admin, &user, &10_000);
+
+    for window in 1..=200 {
+        env.ledger().set_sequence(window * DECAY_WINDOW);
+        let score = client.apply_reputation_decay(&admin, &user);
+        assert!(score >= 0, "decay produced a negative score in window {window}");
+    }
+
+    assert_eq!(client.get_reputation_score(&user), 0);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(8))]
+
+    #[test]
+    fn property_reputation_updates_and_decay_never_go_negative(
+        initial_score in 0i64..=10_000,
+        decay_windows in 0u32..=250,
+    ) {
+        const DECAY_WINDOW: u32 = 17_280;
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, _) = crate::test::setup_contract(&env);
+        let user = Address::generate(&env);
+        client.update_reputation_score(&admin, &user, &initial_score);
+
+        for window in 1..=decay_windows {
+            env.ledger().set_sequence(window * DECAY_WINDOW);
+            let score = client.apply_reputation_decay(&admin, &user);
+            prop_assert!(score >= 0);
+            prop_assert!(client.get_reputation_score(&user) >= 0);
+        }
+    }
 }
 
 #[test]

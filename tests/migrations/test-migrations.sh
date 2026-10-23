@@ -343,6 +343,7 @@ SENTINEL_TABLES=(
     "blocks"
     "dm_keys"
     "notification_preferences"
+    "webhook_subscriptions"
 )
 
 GUARD_OK=1

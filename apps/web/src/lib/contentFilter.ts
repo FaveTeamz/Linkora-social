@@ -107,6 +107,8 @@ const SPAM_PATTERNS: RegExp[] = [
   /(.)\1{9,}/,                // 10+ identical consecutive characters
 ];
 
+const PROFANITY_PATTERNS: RegExp[] = [/\b(?:fuck|shit|bitch|asshole)\b/i];
+
 // ─── Violation enum ───────────────────────────────────────────────────────────
 
 /**
@@ -175,8 +177,8 @@ const SPAM_PATTERNS: RegExp[] = [
  * ---
  *
  * ### PROFANITY
- * **Trigger:** Reserved for future use. Will be raised when a configurable
- * word-filter list (not yet populated) matches content.
+ * **Trigger:** The post body contains a high-confidence profanity term from
+ * the lightweight local word list.
  *
  * **User-facing message:**
  * `"Your post contains language that violates our community guidelines."`
@@ -262,7 +264,8 @@ function containsExecutableContent(text: string): boolean {
  * 2. Executable content check ({@link ContentViolation.EXECUTABLE_CONTENT})
  * 3. Length check ({@link ContentViolation.POST_TOO_LONG})
  * 4. Domain allowlist check ({@link ContentViolation.DISALLOWED_DOMAIN})
- * 5. Spam pattern check ({@link ContentViolation.SPAM_DETECTED})
+ * 5. Profanity check ({@link ContentViolation.PROFANITY})
+ * 6. Spam pattern check ({@link ContentViolation.SPAM_DETECTED})
  *
  * If all checks pass the function returns `{ ok: true, sanitised }` where
  * `sanitised` is the trimmed input with any remaining HTML stripped.
@@ -322,7 +325,16 @@ export function filterContent(raw: string): FilterResult {
     };
   }
 
-  // 5. Spam pattern check
+  // 5. Profanity check
+  if (PROFANITY_PATTERNS.some((re) => re.test(trimmed))) {
+    return {
+      ok: false,
+      violation: ContentViolation.PROFANITY,
+      message: "Your post contains language that violates our community guidelines.",
+    };
+  }
+
+  // 6. Spam pattern check
   const isSpam = SPAM_PATTERNS.some((re) => re.test(trimmed));
   if (isSpam) {
     return {

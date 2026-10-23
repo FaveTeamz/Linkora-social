@@ -244,6 +244,14 @@ services:
         required: false
     environment:
       PORT: ${MEDIA_PORT:-3003}
+      HOST: ${MEDIA_HOST:-0.0.0.0}
+      MEDIA_BUCKET: ${MEDIA_BUCKET:-linkora-media}
+      MEDIA_ENDPOINT: ${MEDIA_ENDPOINT:-}
+      MEDIA_ACCESS_KEY: ${MEDIA_ACCESS_KEY:-}
+      MEDIA_SECRET_KEY: ${MEDIA_SECRET_KEY:-}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-10}
+      CDN_BASE_URL: ${CDN_BASE_URL:-http://localhost:3003}
+      CDN_SIGNING_SECRET: ${CDN_SIGNING_SECRET:-}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     ports:
       - "3003:3003"
@@ -252,23 +260,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
-  media:
-    build:
-      context: ./services/media
-    restart: unless-stopped
-    environment:
-      PORT: 3003
-    ports:
-      - "3003:3003"
-    networks:
-      - backend
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
       interval: 10s

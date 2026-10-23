@@ -2,7 +2,7 @@
 #
 # libvips build dependencies are installed here. They are NOT copied into the
 # final runtime image, keeping it lean.
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
@@ -47,7 +47,7 @@ COPY services/media ./services/media
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2 – runtime: libvips runtime libraries only, no build tools
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine
+FROM node:22-alpine
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 ENV NODE_ENV=production

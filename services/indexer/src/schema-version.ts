@@ -16,6 +16,7 @@ const REQUIRED_TABLES: ReadonlyArray<string> = [
   "blocks",              // 010_blocks_dm_keys
   "dm_keys",             // 010_blocks_dm_keys
   "notification_preferences", // 011_notification_preferences — sentinel for complete migration set
+  "webhook_subscriptions", // 020_outbound_webhooks — sentinel for outbound webhook storage
 ];
 
 /**

@@ -25,6 +25,7 @@ import {
   internalError,
 } from "@linkora/types/src/errors";
 import type { InflightCounter } from "./inflight-counter";
+import { senderRateLimitMiddleware } from "./middleware/senderRateLimit";
 
 const CLOSE_MESSAGE_TOO_LARGE = 1009;
 
@@ -220,6 +221,7 @@ export function createRouter(database: Database, authService: AuthService): Rout
   router.post(
     "/messages",
     messageAuth,
+    senderRateLimitMiddleware,
     idempotencyMiddleware(database),
     validateBody(SendMessageSchema),
     async (req: Request, res: Response) => {

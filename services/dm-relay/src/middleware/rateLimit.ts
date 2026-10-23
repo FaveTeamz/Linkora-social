@@ -343,6 +343,15 @@ export async function closeRateLimiters(): Promise<void> {
 }
 
 /**
+ * Expose the shared Redis client so sibling middleware (e.g. senderRateLimit)
+ * can reuse the same connection rather than opening a second one.
+ * Returns null if Redis is not configured or the connection failed.
+ */
+export function getRedisClient(): Redis | null {
+  return redisClient;
+}
+
+/**
  * Which store currently backs the limiters, for the `/health` endpoint.
  * `shared: false` means limits are enforced per replica, not per deployment.
  */

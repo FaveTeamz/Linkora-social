@@ -106,6 +106,7 @@ function RootNavigator() {
         <Stack.Screen name="dm/[address]" options={{ title: "Direct Message" }} />
         <Stack.Screen name="governance/index" options={{ title: "Governance" }} />
         <Stack.Screen name="governance/[id]" options={{ title: "Proposal" }} />
+        <Stack.Screen name="search/index" options={{ title: "Search" }} />
       </Stack>
     </>
   );

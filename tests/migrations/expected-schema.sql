@@ -62,6 +62,27 @@ CREATE TABLE public.blocks (
     blocker text NOT NULL,
     blocked text NOT NULL
 );
+CREATE TABLE public.creator_analytics (
+    id bigint NOT NULL,
+    creator_address text NOT NULL,
+    snapshot_date date NOT NULL,
+    total_posts integer DEFAULT 0 NOT NULL,
+    total_tips_received bigint DEFAULT 0 NOT NULL,
+    unique_tippers integer DEFAULT 0 NOT NULL,
+    total_followers integer DEFAULT 0 NOT NULL,
+    follower_delta integer DEFAULT 0 NOT NULL,
+    engagement_rate numeric(6,4) DEFAULT 0 NOT NULL,
+    attested_at timestamp with time zone,
+    attestation_sig text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE SEQUENCE public.creator_analytics_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+ALTER SEQUENCE public.creator_analytics_id_seq OWNED BY public.creator_analytics.id;
 CREATE TABLE public.device_tokens (
     id integer NOT NULL,
     address text NOT NULL,
@@ -136,6 +157,26 @@ CREATE SEQUENCE public.likes_id_seq
     NO MAXVALUE
     CACHE 1;
 ALTER SEQUENCE public.likes_id_seq OWNED BY public.likes.id;
+CREATE TABLE public.media_attachments (
+    id bigint NOT NULL,
+    post_id bigint NOT NULL,
+    media_type text NOT NULL,
+    url text NOT NULL,
+    content_hash text NOT NULL,
+    width_px integer,
+    height_px integer,
+    duration_ms integer,
+    size_bytes bigint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT media_attachments_media_type_check CHECK ((media_type = ANY (ARRAY['image'::text, 'video'::text, 'audio'::text])))
+);
+CREATE SEQUENCE public.media_attachments_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+ALTER SEQUENCE public.media_attachments_id_seq OWNED BY public.media_attachments.id;
 CREATE TABLE public.notification_preferences (
     address text NOT NULL,
     browser_push_enabled boolean DEFAULT false NOT NULL,
@@ -166,12 +207,14 @@ CREATE TABLE public.posts (
     like_count bigint DEFAULT 0 NOT NULL,
     created_at timestamp without time zone NOT NULL,
     deleted_at timestamp without time zone,
-    content_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english'::regconfig, COALESCE(content, ''::text))) STORED
+    content_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english'::regconfig, COALESCE(content, ''::text))) STORED,
+    tags text[] DEFAULT '{}'::text[]
 );
 CREATE MATERIALIZED VIEW public.post_scores AS
  SELECT id,
     author,
     content,
+    tags,
     tip_total,
     like_count,
     created_at,
@@ -338,6 +381,34 @@ CREATE SEQUENCE public.reports_id_seq
     NO MAXVALUE
     CACHE 1;
 ALTER SEQUENCE public.reports_id_seq OWNED BY public.reports.id;
+CREATE TABLE public.reputation_scores (
+    user_address text NOT NULL,
+    score integer DEFAULT 0 NOT NULL,
+    posts_count integer DEFAULT 0 NOT NULL,
+    tips_sent integer DEFAULT 0 NOT NULL,
+    tips_received integer DEFAULT 0 NOT NULL,
+    governance_votes integer DEFAULT 0 NOT NULL,
+    last_computed_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_ledger integer DEFAULT 0 NOT NULL
+);
+CREATE MATERIALIZED VIEW public.search_index AS
+ SELECT 'profile'::text AS entity_type,
+    profiles.address AS entity_id,
+    profiles.username AS title,
+    ''::text AS body,
+    to_tsvector('english'::regconfig, COALESCE(profiles.username, ''::text)) AS search_vector,
+    NULL::timestamp without time zone AS created_at
+   FROM public.profiles
+UNION ALL
+ SELECT 'post'::text AS entity_type,
+    (posts.id)::text AS entity_id,
+    posts.author AS title,
+    posts.content AS body,
+    to_tsvector('english'::regconfig, COALESCE(posts.content, ''::text)) AS search_vector,
+    posts.created_at
+   FROM public.posts
+  WHERE (posts.deleted_at IS NULL)
+  WITH NO DATA;
 CREATE TABLE public.sent_notifications (
     id bigint NOT NULL,
     event_id bigint NOT NULL,
@@ -353,6 +424,17 @@ CREATE SEQUENCE public.sent_notifications_id_seq
     NO MAXVALUE
     CACHE 1;
 ALTER SEQUENCE public.sent_notifications_id_seq OWNED BY public.sent_notifications.id;
+CREATE TABLE public.state_root_accumulators (
+    table_name text NOT NULL,
+    accumulator text DEFAULT repeat('0'::text, 64) NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE TABLE public.state_root_row_hashes (
+    table_name text NOT NULL,
+    row_key text NOT NULL,
+    row_hash text NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
 CREATE TABLE public.tips (
     id integer NOT NULL,
     post_id bigint NOT NULL,
@@ -370,6 +452,45 @@ CREATE SEQUENCE public.tips_id_seq
     NO MAXVALUE
     CACHE 1;
 ALTER SEQUENCE public.tips_id_seq OWNED BY public.tips.id;
+CREATE TABLE public.webhook_deliveries (
+    id bigint NOT NULL,
+    webhook_id bigint NOT NULL,
+    event_id text NOT NULL,
+    event_type text NOT NULL,
+    payload jsonb NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_attempt_at timestamp with time zone,
+    response_status integer,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    CONSTRAINT webhook_deliveries_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'delivering'::text, 'succeeded'::text, 'failed'::text])))
+);
+CREATE SEQUENCE public.webhook_deliveries_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+ALTER SEQUENCE public.webhook_deliveries_id_seq OWNED BY public.webhook_deliveries.id;
+CREATE TABLE public.webhook_subscriptions (
+    id bigint NOT NULL,
+    owner_address text NOT NULL,
+    url text NOT NULL,
+    secret text NOT NULL,
+    event_types text[] DEFAULT ARRAY['*'::text] NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE SEQUENCE public.webhook_subscriptions_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+ALTER SEQUENCE public.webhook_subscriptions_id_seq OWNED BY public.webhook_subscriptions.id;
 ALTER TABLE ONLY public.raw_events ATTACH PARTITION public.raw_events_default DEFAULT;
 ALTER TABLE ONLY public.raw_events ATTACH PARTITION public.raw_events_p0_1000000 FOR VALUES FROM ('0') TO ('1000000');
 ALTER TABLE ONLY public.raw_events ATTACH PARTITION public.raw_events_p1000000_2000000 FOR VALUES FROM ('1000000') TO ('2000000');
@@ -381,15 +502,21 @@ ALTER TABLE ONLY public.raw_events ATTACH PARTITION public.raw_events_p6000000_7
 ALTER TABLE ONLY public.raw_events ATTACH PARTITION public.raw_events_p7000000_8000000 FOR VALUES FROM ('7000000') TO ('8000000');
 ALTER TABLE ONLY public.raw_events ATTACH PARTITION public.raw_events_p8000000_9000000 FOR VALUES FROM ('8000000') TO ('9000000');
 ALTER TABLE ONLY public.raw_events ATTACH PARTITION public.raw_events_p9000000_10000000 FOR VALUES FROM ('9000000') TO ('10000000');
+ALTER TABLE ONLY public.creator_analytics ALTER COLUMN id SET DEFAULT nextval('public.creator_analytics_id_seq'::regclass);
 ALTER TABLE ONLY public.device_tokens ALTER COLUMN id SET DEFAULT nextval('public.device_tokens_id_seq'::regclass);
 ALTER TABLE ONLY public.likes ALTER COLUMN id SET DEFAULT nextval('public.likes_id_seq'::regclass);
+ALTER TABLE ONLY public.media_attachments ALTER COLUMN id SET DEFAULT nextval('public.media_attachments_id_seq'::regclass);
 ALTER TABLE ONLY public.raw_events ALTER COLUMN id SET DEFAULT nextval('public.raw_events_id_seq1'::regclass);
 ALTER TABLE ONLY public.raw_events_legacy ALTER COLUMN id SET DEFAULT nextval('public.raw_events_id_seq'::regclass);
 ALTER TABLE ONLY public.reports ALTER COLUMN id SET DEFAULT nextval('public.reports_id_seq'::regclass);
 ALTER TABLE ONLY public.sent_notifications ALTER COLUMN id SET DEFAULT nextval('public.sent_notifications_id_seq'::regclass);
 ALTER TABLE ONLY public.tips ALTER COLUMN id SET DEFAULT nextval('public.tips_id_seq'::regclass);
+ALTER TABLE ONLY public.webhook_deliveries ALTER COLUMN id SET DEFAULT nextval('public.webhook_deliveries_id_seq'::regclass);
+ALTER TABLE ONLY public.webhook_subscriptions ALTER COLUMN id SET DEFAULT nextval('public.webhook_subscriptions_id_seq'::regclass);
 ALTER TABLE ONLY public.blocks
     ADD CONSTRAINT blocks_pkey PRIMARY KEY (blocker, blocked);
+ALTER TABLE ONLY public.creator_analytics
+    ADD CONSTRAINT creator_analytics_pkey PRIMARY KEY (id);
 ALTER TABLE ONLY public.device_tokens
     ADD CONSTRAINT device_tokens_address_token_key UNIQUE (address, token);
 ALTER TABLE ONLY public.device_tokens
@@ -414,6 +541,8 @@ ALTER TABLE ONLY public.likes
     ADD CONSTRAINT likes_post_id_user_address_key UNIQUE (post_id, user_address);
 ALTER TABLE ONLY public.likes
     ADD CONSTRAINT likes_tx_hash_key UNIQUE (tx_hash);
+ALTER TABLE ONLY public.media_attachments
+    ADD CONSTRAINT media_attachments_pkey PRIMARY KEY (id);
 ALTER TABLE ONLY public.notification_preferences
     ADD CONSTRAINT notification_preferences_pkey PRIMARY KEY (address);
 ALTER TABLE ONLY public.pools
@@ -450,16 +579,31 @@ ALTER TABLE ONLY public.raw_events_legacy
     ADD CONSTRAINT raw_events_pkey PRIMARY KEY (ledger_sequence, event_index);
 ALTER TABLE ONLY public.reports
     ADD CONSTRAINT reports_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.reputation_scores
+    ADD CONSTRAINT reputation_scores_pkey PRIMARY KEY (user_address);
 ALTER TABLE ONLY public.sent_notifications
     ADD CONSTRAINT sent_notifications_dispatch_key_key UNIQUE (dispatch_key);
 ALTER TABLE ONLY public.sent_notifications
     ADD CONSTRAINT sent_notifications_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.state_root_accumulators
+    ADD CONSTRAINT state_root_accumulators_pkey PRIMARY KEY (table_name);
+ALTER TABLE ONLY public.state_root_row_hashes
+    ADD CONSTRAINT state_root_row_hashes_pkey PRIMARY KEY (table_name, row_key);
 ALTER TABLE ONLY public.tips
     ADD CONSTRAINT tips_pkey PRIMARY KEY (id);
 ALTER TABLE ONLY public.tips
     ADD CONSTRAINT tips_tx_hash_key UNIQUE (tx_hash);
+ALTER TABLE ONLY public.webhook_deliveries
+    ADD CONSTRAINT webhook_deliveries_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.webhook_deliveries
+    ADD CONSTRAINT webhook_deliveries_webhook_id_event_id_key UNIQUE (webhook_id, event_id);
+ALTER TABLE ONLY public.webhook_subscriptions
+    ADD CONSTRAINT webhook_subscriptions_pkey PRIMARY KEY (id);
 CREATE INDEX idx_blocks_blocked ON public.blocks USING btree (blocked);
 CREATE INDEX idx_blocks_blocker ON public.blocks USING btree (blocker);
+CREATE INDEX idx_creator_analytics_creator ON public.creator_analytics USING btree (creator_address, snapshot_date DESC);
+CREATE UNIQUE INDEX idx_creator_analytics_creator_date ON public.creator_analytics USING btree (creator_address, snapshot_date);
+CREATE INDEX idx_creator_analytics_date ON public.creator_analytics USING btree (snapshot_date DESC);
 CREATE INDEX idx_device_tokens_address_updated ON public.device_tokens USING btree (address, updated_at DESC);
 CREATE INDEX idx_follows_followee ON public.follows USING btree (followee);
 CREATE INDEX idx_follows_follower ON public.follows USING btree (follower);
@@ -469,15 +613,19 @@ CREATE INDEX idx_governance_votes_proposal ON public.governance_votes USING btre
 CREATE INDEX idx_likes_created_at ON public.likes USING btree (created_at DESC);
 CREATE INDEX idx_likes_post_id ON public.likes USING btree (post_id);
 CREATE INDEX idx_likes_user ON public.likes USING btree (user_address);
+CREATE INDEX idx_media_attachments_content_hash ON public.media_attachments USING btree (content_hash);
+CREATE INDEX idx_media_attachments_post_id ON public.media_attachments USING btree (post_id);
 CREATE INDEX idx_pools_token ON public.pools USING btree (token);
 CREATE INDEX idx_post_scores_author ON public.post_scores USING btree (author, created_at DESC);
 CREATE UNIQUE INDEX idx_post_scores_id ON public.post_scores USING btree (id);
 CREATE INDEX idx_post_scores_score ON public.post_scores USING btree (score DESC);
+CREATE INDEX idx_post_scores_tags ON public.post_scores USING gin (tags);
 CREATE INDEX idx_posts_active ON public.posts USING btree (created_at DESC) WHERE (deleted_at IS NULL);
 CREATE INDEX idx_posts_author ON public.posts USING btree (author);
 CREATE INDEX idx_posts_content_fts ON public.posts USING gin (content_tsv);
 CREATE INDEX idx_posts_created_at ON public.posts USING btree (created_at DESC);
 CREATE INDEX idx_posts_deleted_at ON public.posts USING btree (deleted_at);
+CREATE INDEX idx_posts_tags ON public.posts USING gin (tags);
 CREATE INDEX idx_profiles_username ON public.profiles USING btree (username);
 CREATE INDEX idx_raw_events_contract_id ON public.raw_events_legacy USING btree (contract_id);
 CREATE INDEX idx_raw_events_contract_id1 ON ONLY public.raw_events USING btree (contract_id);
@@ -490,10 +638,19 @@ CREATE INDEX idx_reports_created_at ON public.reports USING btree (created_at DE
 CREATE INDEX idx_reports_post_id ON public.reports USING btree (post_id);
 CREATE INDEX idx_reports_reporter ON public.reports USING btree (reporter_address);
 CREATE INDEX idx_reports_status ON public.reports USING btree (status);
+CREATE INDEX idx_reputation_scores_ledger ON public.reputation_scores USING btree (updated_ledger);
+CREATE INDEX idx_reputation_scores_score ON public.reputation_scores USING btree (score DESC);
+CREATE INDEX idx_search_index_created_at ON public.search_index USING btree (created_at DESC);
+CREATE UNIQUE INDEX idx_search_index_entity ON public.search_index USING btree (entity_type, entity_id);
+CREATE INDEX idx_search_index_vector ON public.search_index USING gin (search_vector);
 CREATE INDEX idx_sent_notifications_recipient ON public.sent_notifications USING btree (recipient, dispatched_at DESC);
+CREATE INDEX idx_state_root_row_hashes_table ON public.state_root_row_hashes USING btree (table_name);
 CREATE INDEX idx_tips_created_at ON public.tips USING btree (created_at DESC);
 CREATE INDEX idx_tips_post_id ON public.tips USING btree (post_id);
 CREATE INDEX idx_tips_tipper ON public.tips USING btree (tipper);
+CREATE INDEX idx_webhook_deliveries_created_at ON public.webhook_deliveries USING btree (created_at);
+CREATE INDEX idx_webhook_deliveries_due ON public.webhook_deliveries USING btree (next_attempt_at, id) WHERE (status = 'pending'::text);
+CREATE INDEX idx_webhook_subscriptions_owner ON public.webhook_subscriptions USING btree (owner_address, created_at DESC);
 CREATE INDEX raw_events_default_contract_id_idx ON public.raw_events_default USING btree (contract_id);
 CREATE UNIQUE INDEX raw_events_default_id_ledger_sequence_idx ON public.raw_events_default USING btree (id, ledger_sequence);
 CREATE INDEX raw_events_default_ledger_sequence_event_index_idx ON public.raw_events_default USING btree (ledger_sequence, event_index) WHERE (processed_at IS NULL);
@@ -597,102 +754,11 @@ CREATE TRIGGER reports_updated_at_trigger BEFORE UPDATE ON public.reports FOR EA
 CREATE TRIGGER update_follow_counts_trigger AFTER INSERT OR DELETE ON public.follows FOR EACH ROW EXECUTE FUNCTION public.sync_follow_counts();
 ALTER TABLE ONLY public.likes
     ADD CONSTRAINT likes_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id);
+ALTER TABLE ONLY public.media_attachments
+    ADD CONSTRAINT media_attachments_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id) ON DELETE CASCADE NOT VALID;
 ALTER TABLE ONLY public.reports
     ADD CONSTRAINT reports_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id);
 ALTER TABLE ONLY public.sent_notifications
     ADD CONSTRAINT sent_notifications_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.raw_events_legacy(id) ON DELETE CASCADE;
 ALTER TABLE ONLY public.tips
     ADD CONSTRAINT tips_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id);
-
--- Migration 016: reputation_scores
-CREATE TABLE public.reputation_scores (
-    user_address text NOT NULL,
-    score integer DEFAULT 0 NOT NULL,
-    posts_count integer DEFAULT 0 NOT NULL,
-    tips_sent integer DEFAULT 0 NOT NULL,
-    tips_received integer DEFAULT 0 NOT NULL,
-    governance_votes integer DEFAULT 0 NOT NULL,
-    last_computed_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_ledger integer DEFAULT 0 NOT NULL
-);
-ALTER TABLE ONLY public.reputation_scores
-    ADD CONSTRAINT reputation_scores_pkey PRIMARY KEY (user_address);
-CREATE INDEX idx_reputation_scores_score ON public.reputation_scores USING btree (score DESC);
-CREATE INDEX idx_reputation_scores_ledger ON public.reputation_scores USING btree (updated_ledger);
-
--- Migration 017: creator_analytics
-CREATE SEQUENCE public.creator_analytics_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-CREATE TABLE public.creator_analytics (
-    id bigint DEFAULT nextval('public.creator_analytics_id_seq'::regclass) NOT NULL,
-    creator_address text NOT NULL,
-    snapshot_date date NOT NULL,
-    total_posts integer DEFAULT 0 NOT NULL,
-    total_tips_received bigint DEFAULT 0 NOT NULL,
-    unique_tippers integer DEFAULT 0 NOT NULL,
-    total_followers integer DEFAULT 0 NOT NULL,
-    follower_delta integer DEFAULT 0 NOT NULL,
-    engagement_rate numeric(6,4) DEFAULT 0 NOT NULL,
-    attested_at timestamp with time zone,
-    attestation_sig text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-ALTER TABLE ONLY public.creator_analytics
-    ADD CONSTRAINT creator_analytics_pkey PRIMARY KEY (id);
-CREATE UNIQUE INDEX idx_creator_analytics_creator_date ON public.creator_analytics USING btree (creator_address, snapshot_date);
-CREATE INDEX idx_creator_analytics_creator ON public.creator_analytics USING btree (creator_address, snapshot_date DESC);
-CREATE INDEX idx_creator_analytics_date ON public.creator_analytics USING btree (snapshot_date DESC);
-
--- Migration 018: search_index (materialized view)
-CREATE MATERIALIZED VIEW public.search_index AS
- SELECT 'profile'::text AS entity_type,
-    address AS entity_id,
-    username AS title,
-    COALESCE(bio, ''::text) AS body,
-    to_tsvector('english'::regconfig, (COALESCE(username, ''::text) || ' '::text) || COALESCE(bio, ''::text)) AS search_vector,
-    created_at
-   FROM public.profiles
-UNION ALL
- SELECT 'post'::text AS entity_type,
-    id AS entity_id,
-    author AS title,
-    content AS body,
-    to_tsvector('english'::regconfig, COALESCE(content, ''::text)) AS search_vector,
-    created_at
-   FROM public.posts
-  WHERE (deleted_at IS NULL)
-  WITH NO DATA;
-CREATE UNIQUE INDEX idx_search_index_entity ON public.search_index USING btree (entity_type, entity_id);
-CREATE INDEX idx_search_index_vector ON public.search_index USING gin (search_vector);
-CREATE INDEX idx_search_index_created_at ON public.search_index USING btree (created_at DESC);
-
--- Migration 019: media_attachments
-CREATE SEQUENCE public.media_attachments_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-CREATE TABLE public.media_attachments (
-    id bigint DEFAULT nextval('public.media_attachments_id_seq'::regclass) NOT NULL,
-    post_id text NOT NULL,
-    media_type text NOT NULL,
-    url text NOT NULL,
-    content_hash text NOT NULL,
-    width_px integer,
-    height_px integer,
-    duration_ms integer,
-    size_bytes bigint,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT media_attachments_media_type_check CHECK ((media_type = ANY (ARRAY['image'::text, 'video'::text, 'audio'::text])))
-);
-ALTER TABLE ONLY public.media_attachments
-    ADD CONSTRAINT media_attachments_pkey PRIMARY KEY (id);
-CREATE INDEX idx_media_attachments_post_id ON public.media_attachments USING btree (post_id);
-CREATE INDEX idx_media_attachments_content_hash ON public.media_attachments USING btree (content_hash);
-ALTER TABLE ONLY public.media_attachments
-    ADD CONSTRAINT media_attachments_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id) ON DELETE CASCADE NOT VALID;

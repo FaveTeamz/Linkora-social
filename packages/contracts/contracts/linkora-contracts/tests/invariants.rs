@@ -27,7 +27,7 @@ use soroban_sdk::{
     Address, BytesN, Env, String,
 };
 
-use linkora_contracts::{GovParameter, LinkoraContract, LinkoraContractClient, StorageKey};
+use linkora_contracts::{GovParameter, GovStatus, LinkoraContract, LinkoraContractClient, StorageKey};
 
 fn setup_token(env: &Env, admin: &Address) -> Address {
     let token_id = env.register_stellar_asset_contract_v2(admin.clone());
@@ -351,6 +351,28 @@ fn invariant_vote_window_enforced() {
     let voter2 = Address::generate(&env);
     let r = client.try_gov_vote(&voter2, &proposal_id, &true);
     assert!(r.is_err(), "vote should fail after vote window closes");
+}
+
+#[test]
+fn governance_finalization_persists_passed_and_failed_statuses() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let token = setup_token(&env, &admin);
+    client.set_profile(&admin, &String::from_str(&env, "admin"), &token);
+    client.gov_init_config(&admin, &60, &10, &5, &0, &0);
+
+    let passed_id = client.gov_propose(&admin, &GovParameter::FeeBps, &500, &None);
+    client.gov_vote(&admin, &passed_id, &true);
+    env.ledger().with_mut(|ledger| ledger.sequence_number += 6);
+    assert_eq!(client.gov_finalize(&passed_id), GovStatus::Passed);
+    assert_eq!(client.gov_get_proposal(&passed_id).status, GovStatus::Passed);
+
+    let failed_id = client.gov_propose(&admin, &GovParameter::FeeBps, &600, &None);
+    client.gov_vote(&admin, &failed_id, &false);
+    env.ledger().with_mut(|ledger| ledger.sequence_number += 6);
+    assert_eq!(client.gov_finalize(&failed_id), GovStatus::Failed);
+    assert_eq!(client.gov_get_proposal(&failed_id).status, GovStatus::Failed);
 }
 
 // ── Invariant 11: Time-lock is enforced ────────────────────────────────────

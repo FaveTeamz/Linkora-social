@@ -83,6 +83,32 @@ function rowToDmMessage(row: DmMessageRow): DmMessage {
   };
 }
 
+export interface Notification {
+  id: string;
+  type: string;
+  body: string;
+  read: boolean;
+  createdAt: number;
+}
+
+interface NotificationRow {
+  id: string;
+  type: string;
+  body: string;
+  read: number;
+  created_at: number;
+}
+
+function rowToNotification(row: NotificationRow): Notification {
+  return {
+    id: row.id,
+    type: row.type,
+    body: row.body,
+    read: row.read === 1,
+    createdAt: Number(row.created_at),
+  };
+}
+
 /**
  * Initializes the database schema and indices.
  */
@@ -273,262 +299,56 @@ export async function addOptimisticPost(
 }
 
 /**
- * Updates a pending post's sync status to synced and re-keys its ID.
+ * Retrieves all cached notifications, newest first.
  */
-export async function confirmPendingPost(localId: string, realId: string): Promise<void> {
-  const exists = await getCachedPostById(realId);
+export async function getCachedNotifications(): Promise<Notification[]> {
+  const rows = await db.getAllAsync<NotificationRow>(
+    `SELECT * FROM notifications ORDER BY created_at DESC`
+  );
+  return rows.map(rowToNotification);
+}
+
+/**
+ * Returns the number of unread notifications from the local cache.
+ */
+export async function getUnreadNotificationCount(): Promise<number> {
+  const row = await db.getFirstAsync<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM notifications WHERE read = 0`
+  );
+  return row ? Number(row.count) : 0;
+}
+
+/**
+ * Reconciles remote notifications with the local cache, preserving the local
+ * read flag for notifications that already exist locally.
+ */
+export async function reconcileNotifications(remote: Notification[]): Promise<void> {
+  if (remote.length === 0) return;
+
   await db.withTransactionAsync(async () => {
-    if (exists) {
-      await db.runAsync(`DELETE FROM cached_posts WHERE id = ?`, [localId]);
-    } else {
-      await db.runAsync(`UPDATE cached_posts SET id = ?, sync_status = 'synced' WHERE id = ?`, [
-        realId,
-        localId,
-      ]);
-    }
+    const placeholders = remote.map(() => "(?, ?, ?, ?, ?)").join(", ");
+    const params = remote.flatMap((n) => [
+      n.id,
+      n.type,
+      n.body,
+      n.read ? 1 : 0,
+      n.createdAt,
+    ]);
+    await db.runAsync(
+      `INSERT INTO notifications (id, type, body, read, created_at)
+       VALUES ${placeholders}
+       ON CONFLICT(id) DO UPDATE SET
+         type       = excluded.type,
+         body       = excluded.body,
+         created_at = excluded.created_at`,
+      params
+    );
   });
 }
 
 /**
- * Marks a pending post as failed.
- */
-export async function markPendingPostFailed(localId: string): Promise<void> {
-  await db.runAsync(`UPDATE cached_posts SET sync_status = 'failed' WHERE id = ?`, [localId]);
-}
-
-/**
- * Returns all pending or failed posts.
- */
-export async function getPendingPosts(): Promise<Post[]> {
-  const rows = await db.getAllAsync<CachedPostRow>(
-    `SELECT * FROM cached_posts WHERE sync_status = 'pending' OR sync_status = 'failed'`,
-    []
-  );
-  return rows.map(rowToPost);
-}
-
-/**
- * Evicts old posts to keep the cache lightweight.
- */
-export async function evictStaleCache(
-  maxAgeSeconds: number = 86400 * 7,
-  maxRows: number = 100
-): Promise<void> {
-  const cutoff = Math.floor(Date.now() / 1000) - maxAgeSeconds;
-  await db.runAsync(`DELETE FROM cached_posts WHERE sync_status = 'synced' AND timestamp < ?`, [
-    cutoff,
-  ]);
-  await db.runAsync(
-    `DELETE FROM cached_posts
-     WHERE sync_status = 'synced'
-     AND id NOT IN (
-       SELECT id FROM cached_posts
-       WHERE sync_status = 'synced'
-       ORDER BY timestamp DESC
-       LIMIT ?
-     )`,
-    [maxRows]
-  );
-}
-
-/**
- * Deletes a cached post by its ID.
- */
-export async function deleteCachedPost(id: string): Promise<void> {
-  await db.runAsync(`DELETE FROM cached_posts WHERE id = ?`, [id]);
-}
-
-/**
- * Returns all locally known messages for a conversation, oldest first.
- * Includes outbox entries still 'pending' or 'failed' alongside 'synced' ones
- * so the thread renders optimistic sends immediately.
- */
-export async function getDmMessages(conversationId: string): Promise<DmMessage[]> {
-  const rows = await db.getAllAsync<DmMessageRow>(
-    `SELECT * FROM dm_messages WHERE conversation_id = ? ORDER BY timestamp ASC`,
-    [conversationId]
-  );
-  return rows.map(rowToDmMessage);
-}
-
-/**
- * Reconciles relay-confirmed messages into the local thread.
- *
- * Relay-wins policy:
- *  - Every incoming message is upserted as 'synced', keyed by its relay-assigned id.
- *  - A local 'pending'/'failed' outbox row with the SAME ciphertext hash (the same
- *    logical message, composed on this or another device before the relay assigned
- *    it an id) is deleted once its confirmed counterpart lands — this is what
- *    prevents an optimistic send from showing up twice after reconciliation.
- */
-export async function mergeDmDeltas(
-  conversationId: string,
-  incoming: IncomingDmMessage[]
-): Promise<DmMergeResult> {
-  let newestTimestamp: number | null = null;
-
-  await db.withTransactionAsync(async () => {
-    for (const msg of incoming) {
-      await db.runAsync(
-        `INSERT INTO dm_messages (id, conversation_id, sender, recipient, content, ciphertext_hash, timestamp, sync_status, error_message, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', NULL, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           content         = excluded.content,
-           ciphertext_hash = excluded.ciphertext_hash,
-           timestamp       = excluded.timestamp,
-           sync_status     = 'synced',
-           error_message   = NULL;`,
-        [
-          msg.id,
-          conversationId,
-          msg.sender,
-          msg.recipient,
-          msg.content,
-          msg.ciphertextHash,
-          msg.timestamp,
-          Math.floor(Date.now() / 1000),
-        ]
-      );
-
-      await db.runAsync(
-        `DELETE FROM dm_messages
-         WHERE conversation_id = ?
-           AND sync_status IN ('pending', 'failed')
-           AND ciphertext_hash = ?
-           AND id != ?`,
-        [conversationId, msg.ciphertextHash, msg.id]
-      );
-
-      if (newestTimestamp === null || msg.timestamp > newestTimestamp) {
-        newestTimestamp = msg.timestamp;
-      }
-    }
-  });
-
-  return { mergedCount: incoming.length, newestTimestamp };
-}
-
-/**
- * Inserts a locally composed message awaiting relay confirmation.
- */
-export async function addOutboxDmMessage(
-  conversationId: string,
-  sender: string,
-  recipient: string,
-  content: string,
-  ciphertextHash: string
-): Promise<DmMessage> {
-  const localId = `dm_local_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-  const timestamp = Math.floor(Date.now() / 1000);
-  await db.runAsync(
-    `INSERT INTO dm_messages (id, conversation_id, sender, recipient, content, ciphertext_hash, timestamp, sync_status, error_message, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?)`,
-    [localId, conversationId, sender, recipient, content, ciphertextHash, timestamp, timestamp]
-  );
-  return {
-    id: localId,
-    conversationId,
-    sender,
-    recipient,
-    content,
-    ciphertextHash,
-    timestamp,
-    syncStatus: "pending",
-    errorMessage: null,
-  };
-}
-
-/**
- * Marks an outbox message as rejected by the relay, preserving the reason so
- * the thread UI can surface it instead of leaving it silently pending.
- */
-export async function markDmMessageFailed(localId: string, errorMessage: string): Promise<void> {
-  await db.runAsync(
-    `UPDATE dm_messages SET sync_status = 'failed', error_message = ? WHERE id = ?`,
-    [errorMessage, localId]
-  );
-}
-
-/**
- * Returns the timestamp this device last reconciled up to for a conversation.
- * 0 means the conversation has never been synced.
- */
-export async function getDmSyncCursor(conversationId: string): Promise<number> {
-  const row = await db.getFirstAsync<{ sync_cursor: number }>(
-    `SELECT sync_cursor FROM dm_sync_state WHERE conversation_id = ?`,
-    [conversationId]
-  );
-  return row ? Number(row.sync_cursor) : 0;
-}
-
-/**
- * Advances the per-conversation sync cursor. Monotonic: never moves backward,
- * even if called with an older timestamp than what's already stored.
- */
-export async function setDmSyncCursor(conversationId: string, cursor: number): Promise<void> {
-  await db.runAsync(
-    `INSERT INTO dm_sync_state (conversation_id, sync_cursor, last_read)
-     VALUES (?, ?, 0)
-     ON CONFLICT(conversation_id) DO UPDATE SET
-       sync_cursor = MAX(sync_cursor, excluded.sync_cursor);`,
-    [conversationId, cursor]
-  );
-}
-
-/**
- * Returns the timestamp up to which the user has read this conversation.
- */
-export async function getDmLastRead(conversationId: string): Promise<number> {
-  const row = await db.getFirstAsync<{ last_read: number }>(
-    `SELECT last_read FROM dm_sync_state WHERE conversation_id = ?`,
-    [conversationId]
-  );
-  return row ? Number(row.last_read) : 0;
-}
-
-/**
- * Advances the read watermark. Monotonic, like the sync cursor.
- *
- * Callers must only pass the timestamp of a message that has actually been
- * reconciled (sync_status = 'synced') from the merged state — advancing it
- * from a pre-reconciliation local snapshot can mark messages that arrived on
- * another device while this one was offline as already read.
- */
-export async function setDmLastRead(conversationId: string, timestamp: number): Promise<void> {
-  await db.runAsync(
-    `INSERT INTO dm_sync_state (conversation_id, sync_cursor, last_read)
-     VALUES (?, 0, ?)
-     ON CONFLICT(conversation_id) DO UPDATE SET
-       last_read = MAX(last_read, excluded.last_read);`,
-    [conversationId, timestamp]
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Notifications
-// ---------------------------------------------------------------------------
-
-export interface NotificationRow {
-  id: string;
-  type: string;
-  body: string;
-  read: number;
-  created_at: number;
-}
-
-/**
- * Returns all notifications ordered newest-first.
- */
-export async function getNotifications(): Promise<NotificationRow[]> {
-  return db.getAllAsync<NotificationRow>(
-    `SELECT id, type, body, read, created_at FROM notifications ORDER BY created_at DESC`,
-    []
-  );
-}
-
-/**
- * Marks every unread notification as read.
+ * Marks every notification as read in the local cache.
  */
 export async function markAllNotificationsRead(): Promise<void> {
-  await db.runAsync(`UPDATE notifications SET read = 1 WHERE read = 0`, []);
+  await db.runAsync(`UPDATE notifications SET read = 1 WHERE read = 0`);
 }

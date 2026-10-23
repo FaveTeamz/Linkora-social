@@ -46,6 +46,90 @@ const statusColors: Record<string, { bg: string; text: string; border: string }>
   },
 };
 
+/**
+ * ProposalCardSkeleton — placeholder shown while proposals are fetching.
+ *
+ * Mirrors the ProposalCard layout (header, stats grid, footer) and uses the
+ * same padding/border-radius so the loading state matches the real card
+ * dimensions and avoids layout shift when data arrives.
+ */
+export function ProposalCardSkeleton() {
+  const blockStyle: React.CSSProperties = {
+    backgroundColor: "var(--muted)",
+    borderRadius: "0.375rem",
+  };
+
+  return (
+    <article
+      className="proposal-card proposal-card--skeleton border border-border bg-background"
+      style={{
+        borderRadius: "0.75rem",
+        padding: "1.25rem",
+      }}
+      aria-hidden="true"
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: "1rem",
+          gap: "1rem",
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <div style={{ ...blockStyle, height: "1.05rem", width: "60%" }} />
+          <div style={{ ...blockStyle, height: "0.8rem", width: "40%", marginTop: "0.5rem" }} />
+        </div>
+        <div style={{ ...blockStyle, height: "1.5rem", width: "4.5rem", borderRadius: "9999px", flexShrink: 0 }} />
+      </div>
+
+      {/* Stats grid */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+          gap: "0.75rem",
+          marginBottom: "1.25rem",
+        }}
+      >
+        {[0, 1].map((i) => (
+          <div
+            key={i}
+            style={{
+              padding: "0.75rem",
+              borderRadius: "0.5rem",
+              backgroundColor: "var(--muted)",
+              border: "1px solid var(--color-border)",
+            }}
+          >
+            <div style={{ ...blockStyle, height: "0.7rem", width: "50%" }} />
+            <div style={{ ...blockStyle, height: "1.05rem", width: "70%", marginTop: "0.5rem" }} />
+          </div>
+        ))}
+      </div>
+
+      {/* Vote counts + actions */}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "0.75rem",
+        }}
+      >
+        <div style={{ display: "flex", gap: "1rem" }}>
+          <div style={{ ...blockStyle, height: "0.9rem", width: "4rem" }} />
+          <div style={{ ...blockStyle, height: "0.9rem", width: "5rem" }} />
+        </div>
+        <div style={{ ...blockStyle, height: "2rem", width: "6rem", borderRadius: "0.5rem" }} />
+      </div>
+    </article>
+  );
+}
+
 export function ProposalCard({
   proposal: p,
   connected,

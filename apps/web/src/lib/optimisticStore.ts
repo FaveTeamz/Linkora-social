@@ -134,6 +134,31 @@ export const OptimisticStore = {
     return true;
   },
 
+  // Optimistically toggle follow state for a follower/followee pair. Captures
+  // a snapshot of the current state (or the provided fallback) so a failed
+  // transaction can roll back to exactly what the user saw before clicking.
+  // Returns the newly applied optimistic state.
+  toggleFollow(
+    follower: string,
+    followee: string,
+    fallback: FollowState
+  ): FollowState {
+    const key = `${follower}:${followee}`;
+    const current = followStateMap.get(key) ?? fallback;
+    followSnapshots.set(key, deepClone(current));
+    const next: FollowState = {
+      isFollowing: !current.isFollowing,
+      followersCount: Math.max(
+        0,
+        current.followersCount + (current.isFollowing ? -1 : 1)
+      ),
+      followingCount: current.followingCount,
+    };
+    followStateMap.set(key, next);
+    notify();
+    return next;
+  },
+
   setLikeState(key: string, state: LikeState) {
     likeStateMap.set(key, state);
     notify();
@@ -274,8 +299,11 @@ export function useOptimisticLike(
  * Returns the optimistic tip state if one exists, otherwise falls back
  * to `initialState`.
  */
-export function useOptimisticTip(postId: string | bigint, initialState: TipState): TipState {
-  const key = String(postId);
+export function useOptimisticTip(
+  postId: string | bigint,
+  initialState: TipState
+): TipState {
+  const key = `${postId}`;
 
   const optimistic = useSyncExternalStore(
     subscribe,

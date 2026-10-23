@@ -7,7 +7,7 @@ import { sha512 } from "@noble/hashes/sha512";
 import { randomUUID } from "crypto";
 import { encodeReport } from "./codec.js";
 import { Signer } from "./signer.js";
-import { fetchCreatorStats } from "./db.js";
+import { fetchCreatorMetrics, fetchCreatorStats, fetchPlatformStats } from "./db.js";
 import { submitAttestation } from "./submitter.js";
 import { AnalyticsReport, SignedAttestation } from "./types.js";
 import { logger } from "./logger.js";
@@ -236,6 +236,63 @@ app.use(rateLimiter);
 
 const creatorParamsSchema = z.object({
   creator: z.string().regex(/^G[A-Z2-7]{55}$/, "Invalid Stellar address format"),
+});
+const analyticsPeriodSchema = z.enum(["1d", "7d", "30d", "90d"]);
+const periodDays: Record<z.infer<typeof analyticsPeriodSchema>, number> = {
+  "1d": 1,
+  "7d": 7,
+  "30d": 30,
+  "90d": 90,
+};
+
+function getAnalyticsWindow(periodValue: unknown) {
+  const parsedPeriod = analyticsPeriodSchema.safeParse(periodValue ?? "7d");
+  if (!parsedPeriod.success) return null;
+  const windowEnd = new Date();
+  const windowStart = new Date(windowEnd.getTime() - periodDays[parsedPeriod.data] * 86_400_000);
+  return {
+    period: parsedPeriod.data,
+    windowStart,
+    windowEnd,
+  };
+}
+
+app.get("/metrics/creators/:creator", validateParams(creatorParamsSchema), async (req, res) => {
+  const window = getAnalyticsWindow(req.query.period);
+  if (!window) {
+    res.status(400).json({ error: "period must be 1d, 7d, 30d, or 90d" });
+    return;
+  }
+  const creator = await fetchCreatorMetrics(db, req.params.creator, window.windowStart);
+  res.json({
+    creatorAddress: req.params.creator,
+    period: window.period,
+    windowStart: window.windowStart.toISOString(),
+    windowEnd: window.windowEnd.toISOString(),
+    totalTips: creator.totalTips.toString(),
+    postCount: creator.postCount.toString(),
+    followerDelta: creator.followerDelta.toString(),
+    uniqueTippers: creator.uniqueTippers,
+  });
+});
+
+app.get("/metrics/platform", async (req, res) => {
+  const window = getAnalyticsWindow(req.query.period);
+  if (!window) {
+    res.status(400).json({ error: "period must be 1d, 7d, 30d, or 90d" });
+    return;
+  }
+  const stats = await fetchPlatformStats(db, window.windowStart);
+  res.json({
+    period: window.period,
+    windowStart: window.windowStart.toISOString(),
+    windowEnd: window.windowEnd.toISOString(),
+    totalTips: stats.totalTips.toString(),
+    postCount: stats.postCount.toString(),
+    followerDelta: stats.followerDelta.toString(),
+    uniqueTippers: stats.uniqueTippers,
+    creatorCount: stats.creatorCount,
+  });
 });
 
 app.get("/attestations/:creator", validateParams(creatorParamsSchema), (req, res) => {

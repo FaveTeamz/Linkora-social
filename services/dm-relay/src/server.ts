@@ -28,7 +28,9 @@ import {
   initRateLimiters,
   closeRateLimiters,
   isWsIpRateLimited,
+  getRedisClient,
 } from "./middleware/rateLimit";
+import { setSenderRateLimitStore } from "./middleware/senderRateLimit";
 import { createHealthRouter } from "./routes/health";
 import { logger } from "./logger";
 import { InflightCounter } from "./inflight-counter";
@@ -102,6 +104,13 @@ async function createApp() {
 
   // Initialise rate limiters (upgrades to Redis store when REDIS_URL is set).
   await initRateLimiters();
+
+  // Upgrade the per-sender message rate limiter to Redis when available so
+  // the 60 msg/min cap is enforced across all replicas.
+  const redisClient = getRedisClient();
+  if (redisClient) {
+    setSenderRateLimitStore(redisClient);
+  }
 
   // Custom middleware
   app.use(requestIdMiddleware);

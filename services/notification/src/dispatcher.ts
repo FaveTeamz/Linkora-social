@@ -1,17 +1,14 @@
 import {
+  NotificationChannel,
+  UserNotificationPreferences,
   getUserPreferences,
-  type NotificationChannel,
-  type UserNotificationPreferences,
 } from "./preferences";
+import { NotificationQueue } from "./queue";
 
 export interface NotificationPayload {
-  id: string;
-  recipient: string;
-  type: "follow" | "tip" | "like" | "mention" | "dm";
   title: string;
   body: string;
   data?: Record<string, unknown>;
-  createdAt: string;
 }
 
 export interface DispatchResult {
@@ -21,104 +18,153 @@ export interface DispatchResult {
   error?: string;
 }
 
-export interface ChannelSender {
-  send(channel: NotificationChannel, payload: NotificationPayload): Promise<void>;
+export interface DispatchSummary {
+  userAddress: string;
+  results: DispatchResult[];
 }
 
-export const defaultSender: ChannelSender = {
-  async send(channel: NotificationChannel, _payload: NotificationPayload): Promise<void> {
-    // In production, delegates to APNs/FCM for push, Resend/SES for email, DB for in-app
-    if (channel === "push" && process.env.NODE_ENV === "test-fail") {
-      throw new Error("Simulated push failure");
+export type ChannelSender = (
+  preferences: UserNotificationPreferences,
+  payload: NotificationPayload
+) => Promise<void>;
+
+const MAX_ATTEMPTS = 3;
+const BASE_BACKOFF_MS = 100;
+
+const channelSenders: Record<NotificationChannel, ChannelSender> = {
+  push: async (preferences, payload) => {
+    if (!preferences.pushTokens || preferences.pushTokens.length === 0) {
+      throw new Error("No push tokens registered for user");
     }
+    // Push delivery is delegated to the push provider integration.
+    void payload;
+  },
+  email: async (preferences, payload) => {
+    if (!preferences.emailAddress) {
+      throw new Error("No email address registered for user");
+    }
+    // Email delivery is delegated to the email provider integration.
+    void payload;
+  },
+  "in-app": async (_preferences, payload) => {
+    // In-app delivery is delegated to the in-app notification store.
+    void payload;
   },
 };
 
-/**
- * Returns the list of enabled channels for the given user preferences.
- */
-export function getEnabledChannels(
-  preferences: UserNotificationPreferences
-): NotificationChannel[] {
-  const channels: NotificationChannel[] = [];
-  if (preferences.channels.push) channels.push("push");
-  if (preferences.channels.email) channels.push("email");
-  if (preferences.channels.inApp) channels.push("in-app");
-  return channels;
-}
-
-/**
- * Dispatches a notification across all enabled channels for a user.
- * Failed channel deliveries do not block other channels and are retried up to 3 times with backoff.
- */
-export async function dispatch(
-  payload: NotificationPayload,
-  sender: ChannelSender = defaultSender
-): Promise<DispatchResult[]> {
-  const preferences = await getUserPreferences(payload.recipient);
-  const enabledChannels = getEnabledChannels(preferences);
-
-  const results: DispatchResult[] = [];
-
-  // Dispatch to all channels concurrently; failures in one channel don't block others
-  await Promise.all(
-    enabledChannels.map(async (channel) => {
-      let attempts = 0;
-      const maxAttempts = 3;
-      let lastError: Error | undefined;
-
-      while (attempts < maxAttempts) {
-        attempts += 1;
-        try {
-          // Structured logging per attempt
-          console.log(
-            JSON.stringify({
-              level: "info",
-              event: "notification_dispatch_attempt",
-              notificationId: payload.id,
-              recipient: payload.recipient,
-              channel,
-              attempt: attempts,
-            })
-          );
-
-          await sender.send(channel, payload);
-
-          results.push({
-            channel,
-            success: true,
-            attempts,
-          });
-          return;
-        } catch (err) {
-          lastError = err instanceof Error ? err : new Error(String(err));
-          console.warn(
-            JSON.stringify({
-              level: "warn",
-              event: "notification_dispatch_failed",
-              notificationId: payload.id,
-              recipient: payload.recipient,
-              channel,
-              attempt: attempts,
-              error: lastError.message,
-            })
-          );
-
-          if (attempts < maxAttempts) {
-            // Exponential backoff: 50ms, 100ms, ...
-            await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempts) * 25));
-          }
-        }
-      }
-
-      results.push({
-        channel,
-        success: false,
-        attempts,
-        error: lastError?.message,
-      });
+function logDispatch(entry: {
+  userAddress: string;
+  channel: NotificationChannel;
+  attempt: number;
+  success: boolean;
+  error?: string;
+}): void {
+  console.log(
+    JSON.stringify({
+      level: entry.success ? "info" : "warn",
+      service: "notification-dispatcher",
+      event: "dispatch_attempt",
+      ...entry,
+      timestamp: new Date().toISOString(),
     })
   );
+}
 
-  return results;
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function getEnabledChannels(
+  userAddress: string
+): Promise<NotificationChannel[]> {
+  const preferences = await getUserPreferences(userAddress);
+  const enabled: NotificationChannel[] = [];
+  if (preferences.channels.push) {
+    enabled.push("push");
+  }
+  if (preferences.channels.email) {
+    enabled.push("email");
+  }
+  if (preferences.channels.inApp) {
+    enabled.push("in-app");
+  }
+  return enabled;
+}
+
+async function dispatchToChannel(
+  channel: NotificationChannel,
+  preferences: UserNotificationPreferences,
+  payload: NotificationPayload
+): Promise<DispatchResult> {
+  const sender = channelSenders[channel];
+  let lastError: string | undefined;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await sender(preferences, payload);
+      logDispatch({
+        userAddress: preferences.userAddress,
+        channel,
+        attempt,
+        success: true,
+      });
+      return { channel, success: true, attempts: attempt };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      logDispatch({
+        userAddress: preferences.userAddress,
+        channel,
+        attempt,
+        success: false,
+        error: lastError,
+      });
+      if (attempt < MAX_ATTEMPTS) {
+        await delay(BASE_BACKOFF_MS * 2 ** (attempt - 1));
+      }
+    }
+  }
+
+  return {
+    channel,
+    success: false,
+    attempts: MAX_ATTEMPTS,
+    error: lastError,
+  };
+}
+
+export async function dispatch(
+  userAddress: string,
+  payload: NotificationPayload
+): Promise<DispatchSummary> {
+  const preferences = await getUserPreferences(userAddress);
+  const channels = await getEnabledChannels(userAddress);
+
+  const results = await Promise.all(
+    channels.map((channel) =>
+      dispatchToChannel(channel, preferences, payload).catch(
+        (error): DispatchResult => ({
+          channel,
+          success: false,
+          attempts: 0,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      )
+    )
+  );
+
+  return { userAddress, results };
+}
+
+export const notificationQueue = new NotificationQueue<NotificationPayload>(async (payload) => {
+  const results = await dispatch(payload, defaultSender, { maxAttempts: 1 });
+  const failed = results.filter((result) => !result.success);
+  if (failed.length > 0) {
+    throw new Error(
+      `Notification delivery failed for ${failed.map((result) => result.channel).join(", ")}`
+    );
+  }
+});
+
+export function enqueueNotification(payload: NotificationPayload): string {
+  return notificationQueue.enqueue(payload);
 }

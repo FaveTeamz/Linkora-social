@@ -694,6 +694,15 @@ function main() {
 
   writeFileSync(resolve(OUT_DIR, "schema.hash"), schemaHash + "\n");
   console.log(`  ✓ packages/sdk/src/generated/schema.hash (${schemaHash.slice(0, 8)})`);
+  writeFileSync(
+    resolve(OUT_DIR, "schema.ts"),
+    [
+      "// Auto-generated from schema.hash by packages/codegen/generate.ts.",
+      `export const GENERATED_SCHEMA_HASH = ${JSON.stringify(schemaHash)};`,
+      "",
+    ].join("\n")
+  );
+  console.log("  ✓ packages/sdk/src/generated/schema.ts");
 
   const typesContent = generateTypes(structs, enums);
   writeFileSync(resolve(OUT_DIR, "types.ts"), typesContent);

@@ -71,6 +71,13 @@ try {
 The lower-level primitives (`backoffWithJitter`, `CircuitBreaker`,
 `parseRetryAfter`, `withRetry`) are exported directly for reuse.
 
+### Analytics and reputation reads
+
+`AnalyticsClient` reads creator and platform metrics from the analytics oracle
+and caches each period for five minutes. `ReputationClient` reads a creator's
+score or a paginated leaderboard from the indexer. Configure their respective
+`baseUrl` or `indexerUrl` when the services do not use their local defaults.
+
 ### Dry-run status events
 
 `TransactionQueue` emits status events via `queue.on("status", ...)`. When run
@@ -97,6 +104,16 @@ queue.on("status", (e) => {
 ```
 
 ## Pagination
+
+### Contract schema changes
+
+The SDK generator writes the ABI hash to `src/generated/schema.hash` and the
+matching runtime constant to `src/generated/schema.ts`. Regenerate both files
+whenever the contract spec changes, review the generated type and event changes,
+and deploy indexers or WebSocket providers that expose the new `schemaHash` with
+events. Subscribers warn once when a provider reports a different hash and
+continue decoding for compatibility; consumers should use the warning to plan
+their migration before relying on newly added event fields.
 
 The SDK exposes three distinct pagination models depending on which layer you
 are querying. Understanding each one is important for building correct,
@@ -492,10 +509,9 @@ console.log(`Post #${post.id} has received ${post.tip_total} stroops in tips`);
 
 ## ProfileClient — profile methods
 
-Profile operations are exposed directly on `LinkoraClient`. There is no
-separate `ProfileClient` class — the methods are part of `LinkoraClient`, which extends the
-auto-generated base client with input validation, error normalization, and
-TypeScript convenience wrappers.
+On-chain profile operations are exposed directly on `LinkoraClient`. The SDK
+also provides `ProfileClient` for exact, case-insensitive username resolution
+through the indexer, with a one-minute cache.
 
 ### The `Profile` type
 
@@ -516,6 +532,15 @@ interface Profile {
 | `setProfile(user, username, creatorToken)` | Write (throwaway XDR) | Create or update a profile and link it to a creator token.                 |
 | `deleteProfile(user)`                      | Write (throwaway XDR) | Delete the caller's profile from on-chain storage.                         |
 | `setProfileWithNewToken(params)`           | Write (throwaway XDR) | Deploy a creator token and link it to a new profile in two operations.     |
+
+For indexer-backed username resolution, use `ProfileClient`:
+
+```ts
+import { ProfileClient } from "linkora-sdk";
+
+const profiles = new ProfileClient({ indexerUrl: "https://indexer.linkora.example" });
+const address = await profiles.resolveUsername("Alice"); // Stellar address or null
+```
 
 ---
 

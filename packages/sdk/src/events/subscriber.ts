@@ -1,6 +1,7 @@
 import { createDefaultCursorStore, CursorStore } from "./cursor.js";
 import { LinkoraEvent, parseContractEvent, SorobanEvent } from "./types.js";
 import { fetchWithTimeout } from "../utils/fetch.js";
+import { GENERATED_SCHEMA_HASH } from "../generated/schema.js";
 
 export type LinkoraEventHandlers = {
   [T in LinkoraEvent["type"]]?: (event: Extract<LinkoraEvent, { type: T }>) => void | Promise<void>;
@@ -19,11 +20,14 @@ export interface LinkoraEventSubscriberConfig {
   webSocketFactory?: WebSocketFactory;
   /** Timeout in ms for HTTP requests (default 30 000). */
   timeoutMs?: number;
+  /** Expected contract ABI hash. Defaults to the hash bundled with generated SDK bindings. */
+  expectedSchemaHash?: string;
 }
 
 interface GetEventsResult {
   events: SorobanEvent[];
   latestLedger?: number;
+  schemaHash?: string;
 }
 
 interface LinkoraWebSocket {
@@ -53,6 +57,7 @@ export class LinkoraEventSubscriber {
   private cursor?: string;
   private pollIntervalMs: number;
   private socket?: LinkoraWebSocket;
+  private warnedSchemaHashes = new Set<string>();
 
   constructor(private readonly config: LinkoraEventSubscriberConfig) {
     this.cursorStore = config.cursorStore ?? createDefaultCursorStore(config.cursorKeyOrPath);
@@ -163,6 +168,8 @@ export class LinkoraEventSubscriber {
     while (!this.stopRequested) {
       try {
         const result = await this.fetchEvents();
+        this.validateSchemaHash(result.schemaHash);
+        for (const event of result.events) this.validateSchemaHash(event.schemaHash);
         await this.processBatch(result.events);
         this.updatePollInterval(result.events.length);
       } catch (_err) {
@@ -206,7 +213,8 @@ export class LinkoraEventSubscriber {
     }
 
     const json = (await response.json()) as {
-      result?: GetEventsResult;
+      result?: GetEventsResult & { schemaHash?: string };
+      schemaHash?: string;
       error?: { message?: string };
     };
 
@@ -217,6 +225,7 @@ export class LinkoraEventSubscriber {
     return {
       events: json.result?.events ?? [],
       latestLedger: json.result?.latestLedger,
+      schemaHash: json.schemaHash ?? json.result?.schemaHash,
     };
   }
 
@@ -308,11 +317,28 @@ export class LinkoraEventSubscriber {
   private async processWebSocketMessage(data: unknown): Promise<void> {
     const message =
       typeof data === "string"
-        ? (JSON.parse(data) as { event?: SorobanEvent; events?: SorobanEvent[] })
-        : (data as { event?: SorobanEvent; events?: SorobanEvent[] });
+        ? (JSON.parse(data) as {
+            event?: SorobanEvent;
+            events?: SorobanEvent[];
+            schemaHash?: string;
+          })
+        : (data as { event?: SorobanEvent; events?: SorobanEvent[]; schemaHash?: string });
 
     const events = message.events ?? (message.event ? [message.event] : []);
+    this.validateSchemaHash(message.schemaHash);
+    for (const event of events) this.validateSchemaHash(event.schemaHash);
     await this.processBatch(events);
+  }
+
+  private validateSchemaHash(remoteHash?: string): void {
+    if (!remoteHash) return;
+    const expected = this.config.expectedSchemaHash ?? GENERATED_SCHEMA_HASH;
+    if (remoteHash === expected || this.warnedSchemaHashes.has(remoteHash)) return;
+    this.warnedSchemaHashes.add(remoteHash);
+    console.warn(
+      `[linkora-sdk] Event schema mismatch: remote ${remoteHash}, SDK ${expected}. ` +
+        "Events will continue to be decoded; review the schema migration guide."
+    );
   }
 
   private updatePollInterval(eventCount: number): void {

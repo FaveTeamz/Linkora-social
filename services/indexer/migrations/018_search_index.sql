@@ -9,16 +9,16 @@ SELECT
     'profile'::TEXT          AS entity_type,
     address                  AS entity_id,
     username                 AS title,
-    COALESCE(bio, '')        AS body,
+    ''::TEXT                 AS body,
     to_tsvector('english',
-        COALESCE(username, '') || ' ' || COALESCE(bio, '')
+        COALESCE(username, '')
     )                        AS search_vector,
-    created_at
+    NULL::TIMESTAMP          AS created_at
 FROM profiles
 UNION ALL
 SELECT
     'post'::TEXT             AS entity_type,
-    id                       AS entity_id,
+    id::TEXT                 AS entity_id,
     author                   AS title,
     content                  AS body,
     to_tsvector('english', COALESCE(content, '')) AS search_vector,

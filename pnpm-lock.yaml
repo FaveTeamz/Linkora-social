@@ -532,6 +532,9 @@ importers:
 
   services/indexer:
     dependencies:
+      "@linkora/reputation":
+        specifier: workspace:*
+        version: link:../../packages/reputation
       "@linkora/types":
         specifier: workspace:*
         version: link:../../packages/types

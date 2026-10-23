@@ -6,59 +6,8 @@ import {
   NotificationDetailSheet,
   NotificationItem,
 } from "../../components/NotificationDetailSheet";
+import { useNotifications } from "../../hooks/useNotifications";
 import { useTheme } from "../../theme/useTheme";
-
-// ---------------------------------------------------------------------------
-// Stub data — replace with real API hook when the indexer exposes a
-// notifications endpoint.
-// ---------------------------------------------------------------------------
-const STUB_NOTIFICATIONS: NotificationItem[] = [
-  {
-    id: "n1",
-    message: "maya started following you.",
-    timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-    read: false,
-    payload: {
-      type: "NEW_FOLLOWER",
-      followerAddress: "GCKFBEIYTKP6RCZNVPH73XL7XFWTEOAO4MKONX7HOILHDVBMW5EVPOPZ",
-    },
-  },
-  {
-    id: "n2",
-    message: "atlas sent you a 50 XLM tip on your latest post.",
-    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    read: false,
-    payload: {
-      type: "TIP_RECEIVED",
-      senderAddress: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
-      amount: "50",
-      asset: "XLM",
-      postId: "post-abc-123",
-    },
-  },
-  {
-    id: "n3",
-    message: "nova liked your post about creator economy.",
-    timestamp: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
-    read: true,
-    payload: {
-      type: "LIKE_RECEIVED",
-      senderAddress: "GDXU2G6VZLJIFRVDH5HLYCWJ2F64YQZH2TJUFDPBTZC53RIRZQJQ4LNK",
-      postId: "post-xyz-456",
-    },
-  },
-  {
-    id: "n4",
-    message: "There is new activity in the Creator Fund pool.",
-    timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-    read: true,
-    payload: {
-      type: "POOL_ACTIVITY",
-      poolId: "creator-fund",
-      activityType: "deposit",
-    },
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Row component
@@ -140,7 +89,7 @@ function formatRelativeTime(iso: string): string {
 
 export default function NotificationsScreen() {
   const { theme } = useTheme();
-  const [notifications, setNotifications] = useState<NotificationItem[]>(STUB_NOTIFICATIONS);
+  const { notifications, unreadCount, markRead, markAllRead } = useNotifications();
   const [selected, setSelected] = useState<NotificationItem | null>(null);
 
   const handlePress = useCallback((item: NotificationItem) => {
@@ -151,11 +100,16 @@ export default function NotificationsScreen() {
     setSelected(null);
   }, []);
 
-  const handleMarkRead = useCallback((id: string) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
-  }, []);
+  const handleMarkRead = useCallback(
+    (id: string) => {
+      void markRead(id);
+    },
+    [markRead]
+  );
 
-  const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
+  const handleMarkAllRead = useCallback(() => {
+    void markAllRead();
+  }, [markAllRead]);
 
   return (
     // GestureHandlerRootView is required by @gorhom/bottom-sheet
@@ -168,6 +122,19 @@ export default function NotificationsScreen() {
           <View style={[styles.badge, { backgroundColor: theme.colors.brand.primary }]}>
             <Text style={styles.badgeText}>{unreadCount}</Text>
           </View>
+        ) : null}
+        {unreadCount > 0 ? (
+          <TouchableOpacity
+            style={styles.markAllButton}
+            onPress={handleMarkAllRead}
+            accessibilityRole="button"
+            accessibilityLabel="Mark all notifications as read"
+            testID="notifications-mark-all-read"
+          >
+            <Text style={[styles.markAllText, { color: theme.colors.brand.primary }]}>
+              Mark all read
+            </Text>
+          </TouchableOpacity>
         ) : null}
       </View>
 
@@ -216,6 +183,15 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 11,
     fontWeight: "800",
+  },
+  markAllButton: {
+    marginLeft: "auto",
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  markAllText: {
+    fontSize: 13,
+    fontWeight: "600",
   },
   list: {
     paddingBottom: 24,

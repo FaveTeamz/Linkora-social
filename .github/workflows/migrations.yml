@@ -29,9 +29,9 @@ jobs:
       - name: Run migration test suite
         run: bash tests/migrations/test-migrations.sh
 
-      - name: Verify migration count (016–019 must be present)
+      - name: Verify migration count (016–020 must be present)
         run: |
-          EXPECTED_MIN=19
+          EXPECTED_MIN=20
           ACTUAL=$(ls services/indexer/migrations/*.sql | wc -l)
           echo "Migration files found: $ACTUAL"
           if [ "$ACTUAL" -lt "$EXPECTED_MIN" ]; then
@@ -47,5 +47,5 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           TOTAL=$(ls services/indexer/migrations/*.sql | wc -l)
           echo "- Total migration files: **$TOTAL**" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Latest migrations: 016_reputation_scores, 017_creator_analytics, 018_search_index, 019_media_attachments" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Latest migrations: 016_reputation_scores, 017_creator_analytics, 018_search_index, 019_media_attachments, 020_outbound_webhooks" >> "$GITHUB_STEP_SUMMARY"
           echo "- Schema snapshot: \`tests/migrations/expected-schema.sql\`" >> "$GITHUB_STEP_SUMMARY"

@@ -5,6 +5,7 @@ import "./tracing";
 import express, { type Application, Request, Response } from "express";
 import { trace } from "@opentelemetry/api";
 import { pino } from "pino";
+import { notificationQueue } from "./dispatcher";
 
 const logger = pino({
   level: process.env["LOG_LEVEL"] ?? "info",
@@ -20,6 +21,10 @@ const logger = pino({
 
 const app: Application = express();
 app.use(express.json());
+
+app.get("/metrics", (_req: Request, res: Response) => {
+  res.type("text/plain; version=0.0.4").send(notificationQueue.metricsText());
+});
 
 const tracer = trace.getTracer("notification");
 
@@ -47,8 +52,16 @@ const server = app.listen(PORT, () => {
 // Graceful shutdown
 function shutdown() {
   logger.info("shutting down notification service");
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 10_000).unref();
+  server.close(() => {
+    void notificationQueue
+      .stopAndDrain()
+      .then(() => process.exit(0))
+      .catch((error) => {
+        logger.error({ err: error }, "failed to drain notification queue");
+        process.exit(1);
+      });
+  });
+  setTimeout(() => process.exit(1), 30_000).unref();
 }
 
 process.on("SIGTERM", shutdown);

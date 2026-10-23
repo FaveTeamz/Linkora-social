@@ -3,6 +3,7 @@ import helmet from "helmet";
 import sharp from "sharp";
 
 const PORT = parseInt(process.env.PORT ?? "3003", 10);
+const HOST = process.env.HOST ?? "0.0.0.0";
 
 const app: Application = express();
 app.use(helmet());
@@ -49,8 +50,8 @@ app.post(
 );
 
 // ── Start server ───────────────────────────────────────────────────────────
-const server = app.listen(PORT, () => {
-  console.log(`[media] listening on port ${PORT}`);
+const server = app.listen(PORT, HOST, () => {
+  console.log(`[media] listening on ${HOST}:${PORT}`);
 });
 
 // Graceful shutdown

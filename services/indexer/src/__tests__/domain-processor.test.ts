@@ -62,6 +62,7 @@ function makeDb(): jest.Mocked<Database> {
     updateGovernanceProposalStatus: jest.fn().mockResolvedValue(undefined),
     insertGovernanceVote: jest.fn().mockResolvedValue(true),
     listGovernanceProposals: jest.fn().mockResolvedValue({ proposals: [], total: 0 }),
+    getGovernanceProposal: jest.fn().mockResolvedValue(null),
     insertBlock: jest.fn().mockResolvedValue(undefined),
     deleteBlock: jest.fn().mockResolvedValue(undefined),
     getBlockedUsers: jest.fn().mockResolvedValue({ blocked: [], total: 0 }),

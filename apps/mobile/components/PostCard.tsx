@@ -1,7 +1,9 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import * as Haptics from "expo-haptics";
 import {
   GestureResponderEvent,
+  Image,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -31,6 +33,10 @@ export interface Post {
   avatarUri?: string | null;
   /** Blurhash placeholder string shown while the avatar loads. */
   avatarBlurhash?: string | null;
+  /** Remote URIs for media attachments. */
+  mediaUrls?: string[] | null;
+  /** Blurhash placeholders aligned with `mediaUrls`. */
+  mediaBlurhashes?: (string | null)[] | null;
 }
 
 interface FeedPostCardProps {
@@ -83,6 +89,62 @@ function normalizePost(props: PostCardProps): { post: Post; timeLabel?: string }
   };
 }
 
+interface MediaGalleryProps {
+  urls: string[];
+  blurhashes?: (string | null)[] | null;
+  onOpen: (index: number) => void;
+  styles: ReturnType<typeof createStyles>;
+}
+
+function MediaGallery({ urls, blurhashes, onOpen, styles }: MediaGalleryProps) {
+  if (urls.length === 0) return null;
+
+  if (urls.length === 1) {
+    return (
+      <Pressable
+        style={styles.mediaSingle}
+        onPress={() => onOpen(0)}
+        accessibilityRole="imagebutton"
+        accessibilityLabel="Open image"
+      >
+        <BlurhashImage
+          uri={urls[0]}
+          blurhash={blurhashes?.[0] ?? null}
+          width="100%"
+          height="100%"
+          borderRadius={8}
+          containerStyle={styles.mediaSingleInner}
+          accessibilityLabel="Post image"
+        />
+      </Pressable>
+    );
+  }
+
+  return (
+    <View style={styles.mediaGrid}>
+      {urls.map((uri, index) => (
+        <Pressable
+          key={`${uri}-${index}`}
+          style={styles.mediaGridItem}
+          onPress={() => onOpen(index)}
+          accessibilityRole="imagebutton"
+          accessibilityLabel={`Open image ${index + 1}`}
+        >
+          <BlurhashImage
+            uri={uri}
+            blurhash={blurhashes?.[index] ?? null}
+            width="100%"
+            height="100%"
+            borderRadius={8}
+            containerStyle={styles.mediaGridItemInner}
+            accessibilityLabel={`Post image ${index + 1}`}
+          />
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 export function PostCard(props: PostCardProps) {
   const { theme } = useTheme();
   const router = useRouter();
@@ -95,11 +157,15 @@ export function PostCard(props: PostCardProps) {
     initialLikeCount: post.like_count,
   });
 
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   if ("isLoading" in props && props.isLoading) {
     return <SharedPostCardSkeleton />;
   }
+
+  const mediaUrls = post.mediaUrls ?? [];
 
   const handleLikePress = (event: GestureResponderEvent) => {
     // Stop propagation so a like tap doesn't also fire the parent card's
@@ -149,6 +215,15 @@ export function PostCard(props: PostCardProps) {
 
       <Text style={styles.content}>{post.content}</Text>
 
+      {mediaUrls.length > 0 && (
+        <MediaGallery
+          urls={mediaUrls}
+          blurhashes={post.mediaBlurhashes}
+          onOpen={setViewerIndex}
+          styles={styles}
+        />
+      )}
+
       <View style={styles.footer}>
         <Pressable
           accessibilityRole="button"
@@ -185,6 +260,29 @@ export function PostCard(props: PostCardProps) {
         </Pressable>
         <Text style={styles.stat}>💰 {post.tip_total.toFixed(2)}</Text>
       </View>
+
+      <Modal
+        visible={viewerIndex !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewerIndex(null)}
+      >
+        <Pressable
+          style={styles.viewerBackdrop}
+          onPress={() => setViewerIndex(null)}
+          accessibilityRole="button"
+          accessibilityLabel="Close image viewer"
+        >
+          {viewerIndex !== null && mediaUrls[viewerIndex] ? (
+            <Image
+              source={{ uri: mediaUrls[viewerIndex] }}
+              style={styles.viewerImage}
+              resizeMode="contain"
+              accessibilityLabel="Fullscreen image"
+            />
+          ) : null}
+        </Pressable>
+      </Modal>
     </TouchableOpacity>
   );
 }
@@ -261,6 +359,43 @@ function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
       fontSize: 14,
       lineHeight: 20,
     },
+    mediaSingle: {
+      marginTop: 10,
+      width: "100%",
+      aspectRatio: 16 / 9,
+      borderRadius: 8,
+      overflow: "hidden",
+    },
+    mediaSingleInner: {
+      width: "100%",
+      height: "100%",
+    },
+    mediaGrid: {
+      marginTop: 10,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 4,
+    },
+    mediaGridItem: {
+      width: "49%",
+      aspectRatio: 1,
+      borderRadius: 8,
+      overflow: "hidden",
+    },
+    mediaGridItemInner: {
+      width: "100%",
+      height: "100%",
+    },
+    viewerBackdrop: {
+      flex: 1,
+      backgroundColor: "rgba(0, 0, 0, 0.92)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    viewerImage: {
+      width: "100%",
+      height: "100%",
+    },
     footer: {
       flexDirection: "row",
       alignItems: "center",
@@ -272,16 +407,15 @@ function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
       borderRadius: 999,
       borderWidth: 1,
       borderColor: theme.colors.surface.border,
-      paddingHorizontal: 12,
-      alignItems: "center",
+      paddingHorizontal: 10,
       justifyContent: "center",
     },
     likeButtonLiked: {
       borderColor: theme.colors.brand.primary,
-      backgroundColor: theme.colors.brand.primaryLight,
+      backgroundColor: theme.colors.brand.primary,
     },
     likeButtonPressed: {
-      opacity: 0.82,
+      opacity: 0.7,
     },
     likeInner: {
       flexDirection: "row",
@@ -291,27 +425,25 @@ function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
     likeIcon: {
       fontSize: 16,
       color: theme.colors.text.secondary,
-      lineHeight: 18,
     },
     likeIconLiked: {
-      color: theme.colors.brand.primary,
+      color: theme.colors.text.onBrand,
     },
     likeBadge: {
-      minWidth: 22,
-      paddingHorizontal: 7,
-      paddingVertical: 2,
+      minWidth: 20,
+      paddingHorizontal: 6,
+      paddingVertical: 1,
       borderRadius: 999,
       backgroundColor: theme.colors.surface.surface2,
       alignItems: "center",
-      justifyContent: "center",
     },
     likeBadgeLiked: {
-      backgroundColor: theme.colors.brand.primaryLight,
+      backgroundColor: theme.colors.text.onBrand,
     },
     likeBadgeText: {
-      color: theme.colors.text.secondary,
       fontSize: 11,
-      fontWeight: "700",
+      fontWeight: "600",
+      color: theme.colors.text.secondary,
     },
     likeBadgeTextLiked: {
       color: theme.colors.brand.primary,
@@ -319,18 +451,6 @@ function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
     stat: {
       color: theme.colors.text.secondary,
       fontSize: 12,
-      fontWeight: "700",
-    },
-    statLiked: {
-      color: theme.colors.brand.primary,
-    },
-    skeletonBlock: {
-      backgroundColor: theme.colors.surface.surface2,
-    },
-    skeletonLine: {
-      height: 12,
-      borderRadius: 6,
-      backgroundColor: theme.colors.surface.surface2,
     },
   });
 }

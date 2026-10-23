@@ -64,3 +64,51 @@ export function calculateProfileRank(
   const finalScore = (baseScore + 0.1) * matchMultiplier * (1.0 + repBoost);
   return Number(finalScore.toFixed(6));
 }
+
+/**
+ * Builds a safe PostgreSQL `to_tsquery` expression from a raw user query.
+ * Strips tsquery operators and joins lexemes with `&` so the query is
+ * always syntactically valid and cannot inject tsquery syntax.
+ */
+export function buildTsQuery(rawQuery: string): string {
+  const lexemes = rawQuery
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+
+  if (lexemes.length === 0) {
+    return '';
+  }
+
+  return lexemes.map((token) => `${token}:*`).join(' & ');
+}
+
+/**
+ * Encodes an opaque pagination cursor from a rank and id pair.
+ */
+export function encodeCursor(rank: number, id: string): string {
+  return Buffer.from(JSON.stringify({ rank, id }), 'utf8').toString('base64url');
+}
+
+/**
+ * Decodes a pagination cursor. Returns null when the cursor is malformed.
+ */
+export function decodeCursor(
+  cursor: string
+): { rank: number; id: string } | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (
+      parsed &&
+      typeof parsed.rank === 'number' &&
+      Number.isFinite(parsed.rank) &&
+      typeof parsed.id === 'string'
+    ) {
+      return { rank: parsed.rank, id: parsed.id };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}

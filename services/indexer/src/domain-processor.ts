@@ -38,6 +38,7 @@ import { Database } from "./db";
 import { dispatchNotificationForBusEvent } from "./notifications/events";
 import { scValToNative, xdr } from "@stellar/stellar-sdk";
 import { logger } from "./logger";
+import { refreshReputationScores } from "./reputation";
 
 const TOPIC_FOLLOW = "follow";
 const TOPIC_UNFOLLOW = "unfollow";
@@ -225,12 +226,14 @@ export function createDomainProcessor(
             followee,
             ledger: event.ledgerSequence,
           });
+          await refreshReputationScores(client, [follower, followee], event.ledgerSequence);
         } else {
           await handleFollow(client as never, {
             follower,
             followee,
             ledger: event.ledgerSequence,
           });
+          await refreshReputationScores(client, [follower, followee], event.ledgerSequence);
           await dispatchNotificationForBusEvent(pool as never, notificationService, busEvent);
         }
         break;
@@ -262,6 +265,12 @@ export function createDomainProcessor(
           }
         );
 
+        const postResult = await client.query("SELECT author FROM posts WHERE id = $1", [
+          postId.toString(),
+        ]);
+        const postAuthor = (postResult.rows[0] as { author?: string } | undefined)?.author ?? "";
+        await refreshReputationScores(client, [tipper, postAuthor], event.ledgerSequence);
+
         await dispatchNotificationForBusEvent(pool as never, notificationService, busEvent);
         break;
       }
@@ -287,6 +296,12 @@ export function createDomainProcessor(
             timestamp: new Date(),
           }
         );
+
+        const postResult = await client.query("SELECT author FROM posts WHERE id = $1", [
+          postId.toString(),
+        ]);
+        const postAuthor = (postResult.rows[0] as { author?: string } | undefined)?.author ?? "";
+        await refreshReputationScores(client, [postAuthor], event.ledgerSequence);
 
         await dispatchNotificationForBusEvent(pool as never, notificationService, busEvent);
         break;
@@ -321,6 +336,7 @@ export function createDomainProcessor(
           support,
           ledger: event.ledgerSequence,
         });
+        await refreshReputationScores(client, [voter], event.ledgerSequence);
         break;
       }
 
@@ -484,6 +500,7 @@ export function createDomainProcessor(
           deleted_ledger: null,
           ...(content ? { content } : {}),
         } as Parameters<Database["insertPost"]>[0]);
+        await refreshReputationScores(client, [author], event.ledgerSequence);
         break;
       }
 

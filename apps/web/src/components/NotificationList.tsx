@@ -16,6 +16,7 @@ export interface NotificationItem {
 
 interface NotificationListProps {
   notifications: NotificationItem[];
+  isLoading?: boolean;
   onMarkRead?: (id: string) => void;
   onMarkAllRead?: () => void;
   /** Maximum items to show before a "Load more" prompt. */
@@ -54,6 +55,7 @@ function formatTime(iso: string): string {
  */
 export function NotificationList({
   notifications,
+  isLoading = false,
   onMarkRead,
   onMarkAllRead,
   pageSize = 20,
@@ -63,6 +65,14 @@ export function NotificationList({
   const visible = notifications.slice(0, visibleCount);
   const hasUnread = notifications.some((n) => !n.read);
   const hasMore = visibleCount < notifications.length;
+
+  if (isLoading) {
+    return (
+      <div role="status" aria-label="Loading notifications" className="flex justify-center py-12">
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
+      </div>
+    );
+  }
 
   if (notifications.length === 0) {
     return (

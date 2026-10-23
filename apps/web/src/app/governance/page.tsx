@@ -3,34 +3,26 @@
 import { useEffect, useState } from "react";
 import { useWalletContext } from "@/components/WalletProvider";
 import { LinkoraClient, GovParameter, GovProposal, GovStatus } from "linkora-sdk";
+import { Address, nativeToScVal } from "@stellar/stellar-sdk";
 import { EmptyStateIllustration } from "@/components/ui/EmptyStateIllustration";
+import { buildSignAndSubmit } from "@/lib/tx";
 
 const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
+const NETWORK_PASSPHRASE =
+  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015";
 
 type ProposalWithQuorum = GovProposal & { effectiveQuorum: number };
 const GOVERNANCE_PARAMETERS = Object.values(GovParameter) as GovParameter[];
 const PAGE_SIZE = 10;
 
-// ── Shared Client Instance ───────────────────────────────────────────────────
-// Hoist a single LinkoraClient to module scope so all handlers reuse one client
-// and one underlying rpc.Server connection, avoiding per-action overhead.
-const client = new LinkoraClient({ rpcUrl: RPC_URL, contractId: CONTRACT_ID });
-
-// ── Shared Client Instance ───────────────────────────────────────────────────
-// Hoist a single LinkoraClient to module scope so all handlers reuse one client
-// and one underlying rpc.Server connection, avoiding per-action overhead.
-const client = new LinkoraClient({ rpcUrl: RPC_URL, contractId: CONTRACT_ID });
-
-// ── Shared Client Instance ───────────────────────────────────────────────────
-// Hoist a single LinkoraClient to module scope so all handlers reuse one client
-// and one underlying rpc.Server connection, avoiding per-action overhead.
-const client = new LinkoraClient({ rpcUrl: RPC_URL, contractId: CONTRACT_ID });
-
-// ── Shared Client Instance ───────────────────────────────────────────────────
-// Hoist a single LinkoraClient to module scope so all handlers reuse one client
-// and one underlying rpc.Server connection, avoiding per-action overhead.
-const client = new LinkoraClient({ rpcUrl: RPC_URL, contractId: CONTRACT_ID });
+const ALLOW_LOCAL_HTTP =
+  RPC_URL.startsWith("http://localhost:") || RPC_URL.startsWith("http://127.0.0.1:");
+const client = new LinkoraClient({
+  rpcUrl: RPC_URL,
+  contractId: CONTRACT_ID,
+  allowHttp: ALLOW_LOCAL_HTTP,
+});
 
 export default function GovernancePage() {
   const { address, connected } = useWalletContext();
@@ -47,6 +39,8 @@ export default function GovernancePage() {
   const [formParam, setFormParam] = useState<GovParameter>(GovParameter.FeeBps);
   const [formValue, setFormValue] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isVoting, setIsVoting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const fetchProposals = async (targetPage: number = 1) => {
     if (!CONTRACT_ID) return;
@@ -101,14 +95,34 @@ export default function GovernancePage() {
   const handlePropose = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!address || !CONTRACT_ID) return;
+    if (!/^\d+$/.test(formValue)) {
+      setActionError("Enter a non-negative whole number for the proposal value.");
+      return;
+    }
     setIsSubmitting(true);
+    setActionError(null);
     try {
-      await client.govPropose(address, formParam, BigInt(formValue), null);
+      await buildSignAndSubmit(
+        "gov_propose",
+        [
+          Address.fromString(address).toScVal(),
+          nativeToScVal(formParam),
+          nativeToScVal(BigInt(formValue), { type: "u64" }),
+          nativeToScVal(null),
+        ],
+        address,
+        {
+          contractId: CONTRACT_ID,
+          rpcUrl: RPC_URL,
+          networkPassphrase: NETWORK_PASSPHRASE,
+          allowHttp: ALLOW_LOCAL_HTTP,
+        }
+      );
       setFormValue("");
       await fetchProposals();
     } catch (error) {
       console.error("Failed to propose", error);
-      alert("Failed to create proposal");
+      setActionError(error instanceof Error ? error.message : "Failed to create proposal.");
     } finally {
       setIsSubmitting(false);
     }
@@ -116,12 +130,30 @@ export default function GovernancePage() {
 
   const handleVote = async (proposalId: bigint, support: boolean) => {
     if (!address || !CONTRACT_ID) return;
+    setIsVoting(true);
+    setActionError(null);
     try {
-      await client.govVote(address, proposalId, support);
+      await buildSignAndSubmit(
+        "gov_vote",
+        [
+          Address.fromString(address).toScVal(),
+          nativeToScVal(proposalId, { type: "u64" }),
+          nativeToScVal(support),
+        ],
+        address,
+        {
+          contractId: CONTRACT_ID,
+          rpcUrl: RPC_URL,
+          networkPassphrase: NETWORK_PASSPHRASE,
+          allowHttp: ALLOW_LOCAL_HTTP,
+        }
+      );
       await fetchProposals();
     } catch (error) {
       console.error("Failed to vote", error);
-      alert("Failed to vote");
+      setActionError(error instanceof Error ? error.message : "Failed to vote.");
+    } finally {
+      setIsVoting(false);
     }
   };
 
@@ -259,12 +291,14 @@ export default function GovernancePage() {
                         <div className="flex flex-wrap gap-2">
                           <button
                             onClick={() => handleVote(p.id, true)}
+                            disabled={isVoting}
                             className="flex-1 sm:flex-none px-4 py-2 bg-green-600/20 text-green-500 hover:bg-green-600/30 border border-green-600/50 rounded-lg transition-colors text-sm font-medium"
                           >
                             Vote For
                           </button>
                           <button
                             onClick={() => handleVote(p.id, false)}
+                            disabled={isVoting}
                             className="flex-1 sm:flex-none px-4 py-2 bg-red-600/20 text-red-500 hover:bg-red-600/30 border border-red-600/50 rounded-lg transition-colors text-sm font-medium"
                           >
                             Vote Against
@@ -320,10 +354,14 @@ export default function GovernancePage() {
             ) : (
               <form onSubmit={handlePropose} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-[var(--text-muted)] mb-1">
+                  <label
+                    htmlFor="proposal-parameter"
+                    className="block text-sm font-medium text-[var(--text-muted)] mb-1"
+                  >
                     Parameter
                   </label>
                   <select
+                    id="proposal-parameter"
                     value={formParam}
                     onChange={(e) => setFormParam(e.target.value as GovParameter)}
                     className="w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2 text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-violet-500/50"
@@ -337,12 +375,18 @@ export default function GovernancePage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-[var(--text-muted)] mb-1">
+                  <label
+                    htmlFor="proposal-new-value"
+                    className="block text-sm font-medium text-[var(--text-muted)] mb-1"
+                  >
                     New Value (Integer)
                   </label>
                   <input
+                    id="proposal-new-value"
                     type="number"
                     required
+                    min="0"
+                    step="1"
                     value={formValue}
                     onChange={(e) => setFormValue(e.target.value)}
                     className="w-full bg-[var(--muted)] border border-[var(--border)] rounded-lg px-3 py-2 text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-violet-500/50"
@@ -358,6 +402,11 @@ export default function GovernancePage() {
                   {isSubmitting ? "Proposing..." : "Submit Proposal"}
                 </button>
               </form>
+            )}
+            {actionError && (
+              <p role="alert" className="mt-3 text-sm text-red-400">
+                {actionError}
+              </p>
             )}
           </div>
         </div>

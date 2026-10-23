@@ -128,6 +128,121 @@ describe("LinkoraClient write methods", () => {
     );
   });
 
+  it("sendTip checks fee and token balance, then submits through the queue", async () => {
+    const signer = { signTransaction: jest.fn() };
+    jest.spyOn(client, "getFeeBps").mockResolvedValue(500);
+    jest.spyOn(client as any, "getSep41Balance").mockResolvedValue(1_000n);
+    jest.spyOn(client, "prepareTipTx").mockResolvedValue(XDR);
+    jest.spyOn(client, "submitTransaction").mockResolvedValue("tip-hash");
+
+    await expect(client.sendTip("GUSER", 4, "GTOKEN", 500, signer)).resolves.toEqual({
+      txHash: "tip-hash",
+    });
+    expect(client.getFeeBps).toHaveBeenCalledTimes(1);
+    expect(client.prepareTipTx).toHaveBeenCalledWith("GUSER", 4, "GTOKEN", 500n, undefined);
+  });
+
+  it("sendTip rejects an insufficient SEP-41 balance before submission", async () => {
+    jest.spyOn(client, "getFeeBps").mockResolvedValue(500);
+    jest.spyOn(client as any, "getSep41Balance").mockResolvedValue(10n);
+    const submit = jest.spyOn(client, "submitTransaction");
+
+    await expect(
+      client.sendTip("GUSER", 4, "GTOKEN", 500, { signTransaction: jest.fn() })
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_BALANCE" });
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("withdraw validates pool admins and submits a prepared withdrawal", async () => {
+    jest.spyOn(client, "getPool").mockResolvedValue({
+      admins: ["GADMIN"],
+      balance: 1_000n,
+      threshold: 1,
+      token: "GTOKEN",
+    });
+    jest.spyOn(client, "getPoolAdmins").mockResolvedValue(["GADMIN"]);
+    jest.spyOn(client, "preparePoolWithdrawTx").mockResolvedValue(XDR);
+    jest.spyOn(client, "submitTransaction").mockResolvedValue("withdraw-hash");
+
+    await expect(
+      client.withdraw(["GADMIN"], "pool1", 10, "GRECIPIENT", { signTransaction: jest.fn() })
+    ).resolves.toEqual({ txHash: "withdraw-hash" });
+  });
+
+  it("withdraw rejects a signer who is not a pool admin", async () => {
+    jest.spyOn(client, "getPool").mockResolvedValue({
+      admins: ["GADMIN"],
+      balance: 1_000n,
+      threshold: 1,
+      token: "GTOKEN",
+    });
+    jest.spyOn(client, "getPoolAdmins").mockResolvedValue(["GADMIN"]);
+
+    await expect(
+      client.withdraw(["GOTHER"], "pool1", 10, "GRECIPIENT", { signTransaction: jest.fn() })
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("withdraw rejects a signer set below the pool threshold", async () => {
+    jest.spyOn(client, "getPool").mockResolvedValue({
+      admins: ["GA", "GB"],
+      balance: 1_000n,
+      threshold: 2,
+      token: "GTOKEN",
+    });
+    jest.spyOn(client, "getPoolAdmins").mockResolvedValue(["GA", "GB"]);
+
+    await expect(
+      client.withdraw(["GA"], "pool1", 10, "GRECIPIENT", { signTransaction: jest.fn() })
+    ).rejects.toThrow(/requires 2 admin signatures/);
+  });
+
+  it("createProposal builds and submits the on-chain governance call", async () => {
+    const preparedTx = { toEnvelope: () => ({ toXDR: () => XDR }) };
+    jest.spyOn(client as any, "getAccountForTx").mockResolvedValue({ _accountId: "GUSER" });
+    jest.spyOn(client, "prepareTransaction").mockResolvedValue(preparedTx as any);
+    jest.spyOn(client, "submitTransaction").mockResolvedValue("proposal-hash");
+    (client as any)._rpcServer = { getTransaction: jest.fn().mockResolvedValue({ returnValue: {} }) };
+    const decode = require("@stellar/stellar-base").scValToNative as jest.Mock;
+    decode.mockReturnValue(12n);
+
+    await expect(
+      client.createProposal(
+        "GUSER",
+        "FeeBps" as any,
+        250,
+        null,
+        { signTransaction: jest.fn() }
+      )
+    ).resolves.toEqual({ proposalId: 12n });
+    expect(client.prepareTransaction).toHaveBeenCalledWith(
+      "gov_propose",
+      expect.objectContaining({ _accountId: "GUSER" }),
+      expect.anything(),
+      expect.objectContaining({ _val: "FeeBps" }),
+      expect.objectContaining({ _val: 250n }),
+      expect.objectContaining({ _val: null })
+    );
+  });
+
+  it("vote submits the selected choice through the transaction queue", async () => {
+    const preparedTx = { toEnvelope: () => ({ toXDR: () => XDR }) };
+    jest.spyOn(client as any, "getAccountForTx").mockResolvedValue({ _accountId: "GUSER" });
+    jest.spyOn(client, "prepareTransaction").mockResolvedValue(preparedTx as any);
+    jest.spyOn(client, "submitTransaction").mockResolvedValue("vote-hash");
+
+    await expect(
+      client.vote("GUSER", 12, "for", { signTransaction: jest.fn() })
+    ).resolves.toEqual({ txHash: "vote-hash" });
+    expect(client.prepareTransaction).toHaveBeenCalledWith(
+      "gov_vote",
+      expect.objectContaining({ _accountId: "GUSER" }),
+      expect.anything(),
+      expect.objectContaining({ _val: 12n }),
+      expect.objectContaining({ _val: true })
+    );
+  });
+
   it("createPool includes pool_id", () => {
     expect(client.createPool("GADMIN", "pool1", "GTOKEN", ["GA", "GB"], 2)).toBe(XDR);
     expect(mockCall).toHaveBeenCalledWith(
@@ -238,6 +353,10 @@ describe("LinkoraClient write methods", () => {
     );
   });
 
+  it("rejects post content longer than the contract input limit", () => {
+    expect(() => client.createPost("GVALID", "x".repeat(501))).toThrow(InvalidInputError);
+  });
+
   it("rejects oversized byte arrays for verifyAnalyticsAttestation", () => {
     const oversizedReportCbor = new Uint8Array(64 * 1024 + 1);
     const validSignature = new Uint8Array(64).fill(0xab);
@@ -286,6 +405,25 @@ describe("prepare*Tx methods (Submittable)", () => {
       expect.objectContaining({ _accountId: "GAUTHOR" }),
       addr("GAUTHOR"),
       val("hello")
+    );
+  });
+
+  it("prepareSetProfileTx simulates with the profile owner as source", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    jest.spyOn(client as any, "getAccountForTx").mockResolvedValue(new Account("GUSER", "100"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    jest.spyOn(client, "prepareTransaction").mockResolvedValue({
+      toEnvelope: () => ({ toXDR: () => "PREPARED_XDR" }),
+    } as unknown as Awaited<ReturnType<typeof client.prepareTransaction>>);
+
+    const result = await client.prepareSetProfileTx("GUSER", "alice", "CTOKEN");
+    expect(result).toBe("PREPARED_XDR");
+    expect(client.prepareTransaction).toHaveBeenCalledWith(
+      "set_profile",
+      expect.objectContaining({ _accountId: "GUSER" }),
+      addr("GUSER"),
+      val("alice"),
+      addr("CTOKEN"),
     );
   });
 

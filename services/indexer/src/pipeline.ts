@@ -78,6 +78,8 @@ export interface IngestPipelineOptions {
    * scans.
    */
   onCommit?: (cursor: number, events: IngestEvent[]) => Promise<void> | void;
+  /** Persist external delivery jobs in the ingest transaction before commit. */
+  onBeforeCommit?: (client: PgClientLike, events: IngestEvent[]) => Promise<void>;
 }
 
 export interface BatchResult {
@@ -152,6 +154,7 @@ export class IngestPipeline {
   private readonly serializationRetryAttempts: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly onCommit?: (cursor: number, events: IngestEvent[]) => Promise<void> | void;
+  private readonly onBeforeCommit?: (client: PgClientLike, events: IngestEvent[]) => Promise<void>;
 
   constructor(pool: PgPoolLike, opts: IngestPipelineOptions) {
     this.pool = pool;
@@ -166,6 +169,7 @@ export class IngestPipeline {
     this.sleep =
       opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     this.onCommit = opts.onCommit;
+    this.onBeforeCommit = opts.onBeforeCommit;
   }
 
   /** Read the last committed cursor for this stream (0 if none). */
@@ -254,6 +258,8 @@ export class IngestPipeline {
                updated_at = NOW()`,
         [this.streamId, newCursor]
       );
+
+      await this.onBeforeCommit?.(client, events);
 
       await client.query("COMMIT");
 

@@ -17,27 +17,38 @@ import { Profile, Post, Pool, SimulationResult, LedgerFootprint } from "./types.
 import {
   mapError,
   NotFoundError,
+  UnauthorizedError,
   SimulationError,
   ValidationError,
   InvalidInputError,
   NetworkError,
   LinkoraError,
   VersionMismatchError,
+  InsufficientBalanceError,
   ReadResult,
 } from "./errors.js";
 import { ClassicAccountClient, ClassicBalance } from "./classic.js";
-import { GovParameter } from "./generated/types.js";
-import type { GovProposal } from "./generated/types.js";
+import { GovParameter, GovStatus } from "./generated/types.js";
+import type { GovProposal, GovParameter as GovParameterType } from "./generated/types.js";
 import { ConnectionHealthMonitor, HealthCheckConfig, ConnectionStatusCallback } from "./health.js";
 import { fetchWithTimeout } from "./utils/fetch.js";
 import type { QueueSigner, RunOptions } from "./queue.js";
 import { submitTransaction } from "./submit.js";
+import { decodeOffsetCursor, makeCursorPage, type CursorPage } from "./pagination.js";
 
 const { isSimulationError, isSimulationSuccess } = rpc.Api;
 
 const DEFAULT_NETWORK = "Test SDF Network ; September 2015";
 const DEFAULT_TIMEOUT = 30;
 const MAX_BYTES = 64 * 1024; // 64KB max limit for Soroban host function byte arguments
+const MAX_POST_CONTENT_LENGTH = 500;
+
+function validatePostContent(content: string): void {
+  ensureNonEmptyString(content, "content");
+  if (content.length > MAX_POST_CONTENT_LENGTH) {
+    throw new InvalidInputError(`content must be at most ${MAX_POST_CONTENT_LENGTH} characters.`);
+  }
+}
 
 /**
  * Detect whether a hostname refers to the local machine (loopback only).
@@ -177,6 +188,55 @@ function ensurePositiveInteger(value: number | bigint, fieldName: string): bigin
   return ensureInteger(value, fieldName, 1);
 }
 
+function normalizeDate(value: Date | string | undefined, fieldName: string): Date | undefined {
+  if (value === undefined) return undefined;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new ValidationError(`${fieldName} must be a valid date.`);
+  }
+  return date;
+}
+
+function normalizeTipRecord(value: Record<string, unknown>): TipRecord {
+  const postId = value.post_id ?? value.postId;
+  const createdAt = value.created_at ?? value.createdAt;
+  const amount = value.amount;
+  const fee = value.fee;
+  const id = Number(value.id);
+  const timestamp = createdAt instanceof Date ? createdAt : new Date(String(createdAt));
+  if (!Number.isSafeInteger(id) || Number.isNaN(timestamp.getTime())) {
+    throw new LinkoraError("Indexer returned an invalid tip record.", "INVALID_RESPONSE");
+  }
+  try {
+    const normalizedPostId = BigInt(postId as string | number | bigint);
+    const normalizedAmount = BigInt(amount as string | number | bigint);
+    const normalizedFee = BigInt(fee as string | number | bigint);
+    const tipper = String(value.tipper ?? "");
+    const txHash = String(value.tx_hash ?? value.txHash ?? "");
+    if (
+      normalizedPostId <= 0n ||
+      normalizedAmount <= 0n ||
+      normalizedFee < 0n ||
+      normalizedFee > normalizedAmount ||
+      !tipper ||
+      !txHash
+    ) {
+      throw new Error("Tip record fields are outside their valid range.");
+    }
+    return {
+      id,
+      tipper,
+      post_id: normalizedPostId,
+      amount: normalizedAmount,
+      fee: normalizedFee,
+      created_at: timestamp,
+      tx_hash: txHash,
+    };
+  } catch (cause) {
+    throw new LinkoraError("Indexer returned an invalid tip record.", "INVALID_RESPONSE", undefined, cause);
+  }
+}
+
 function ensureGovParameter(parameter: GovParameter): void {
   const valid = Object.values(GovParameter).includes(parameter);
   if (!valid) {
@@ -216,6 +276,25 @@ export interface ClientConfig {
   allowHttp?: boolean;
   /** Horizon URL for account sequence fetching. If not provided, defaults based on networkPassphrase. */
   horizonUrl?: string;
+  /** Base URL for the indexer REST API (defaults to http://localhost:3001). */
+  indexerUrl?: string;
+}
+
+export type FeedFilter = "latest" | "trending" | "following";
+
+export interface FeedPage {
+  posts: Post[];
+  nextCursor: string | null;
+}
+
+interface IndexerPost {
+  id: string | number;
+  author: string;
+  content: string;
+  tip_total?: string | number;
+  like_count?: string | number;
+  created_at?: string;
+  timestamp?: string | number;
 }
 
 export interface DeployCreatorTokenParams {
@@ -226,10 +305,36 @@ export interface DeployCreatorTokenParams {
   initialSupply: bigint;
 }
 
+export interface GovernanceProposalListOptions {
+  status?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface GovernanceProposalList {
+  proposals: GovProposal[];
+  nextCursor: string | null;
+}
+
 export interface SetProfileWithNewTokenParams {
   user: string;
   username: string;
   tokenParams: Omit<DeployCreatorTokenParams, "deployer">;
+}
+
+export interface CursorPageOptions {
+  limit?: number;
+  cursor?: string | null;
+}
+
+const MAX_CURSOR_PAGE_SIZE = 50;
+
+function normalizeCursorPage(options: CursorPageOptions = {}): { limit: number; offset: number } {
+  const limit = options.limit ?? 20;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CURSOR_PAGE_SIZE) {
+    throw new InvalidInputError(`limit must be an integer from 1 to ${MAX_CURSOR_PAGE_SIZE}`);
+  }
+  return { limit, offset: decodeOffsetCursor(options.cursor) };
 }
 
 /**
@@ -248,7 +353,9 @@ export class LinkoraClient extends GeneratedLinkoraClient {
   private readonly _timeoutMs: number;
   private readonly _allowHttp: boolean;
   private readonly _horizonUrl?: string;
+  private readonly _indexerUrl: string;
   private readonly _rpcServer: rpc.Server;
+  private readonly _indexerUrl: string;
 
   constructor(config: ClientConfig) {
     super({
@@ -264,8 +371,10 @@ export class LinkoraClient extends GeneratedLinkoraClient {
     this._timeoutMs = config.timeoutMs ?? 30_000;
     this._allowHttp = resolveAllowHttp({ rpcUrl: config.rpcUrl, allowHttp: config.allowHttp });
     this._horizonUrl = config.horizonUrl;
+    this._indexerUrl = (config.indexerUrl ?? "http://localhost:3001").replace(/\/$/, "");
 
     this._rpcServer = new rpc.Server(this._rpcUrl, { allowHttp: this._allowHttp });
+    this._indexerUrl = (config.indexerUrl ?? "http://localhost:3001/api").replace(/\/$/, "");
 
     this.classic = new ClassicAccountClient({
       networkPassphrase: this._networkPassphrase,
@@ -302,6 +411,151 @@ export class LinkoraClient extends GeneratedLinkoraClient {
     opts?: RunOptions
   ): Promise<string> {
     return submitTransaction(this, xdrOrTx, signer, opts);
+  }
+
+  /** Fetch a cursor-paginated feed from the indexer. */
+  async getFeed(
+    filter: FeedFilter = "latest",
+    cursor?: string,
+    limit = 20,
+    viewerAddress?: string
+  ): Promise<FeedPage> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new InvalidInputError("limit must be an integer between 1 and 100.");
+    }
+    const params = new URLSearchParams({ limit: String(limit) });
+    let path: string;
+    if (filter === "latest") {
+      const offset = cursor === undefined ? 0 : Number(cursor);
+      if (!Number.isSafeInteger(offset) || offset < 0) {
+        throw new InvalidInputError("latest feed cursor must be a non-negative offset.");
+      }
+      params.set("offset", String(offset));
+      path = "/api/feed";
+    } else if (filter === "trending") {
+      if (cursor !== undefined) params.set("cursor", cursor);
+      path = "/api/feed/explore";
+    } else {
+      if (!viewerAddress) {
+        throw new InvalidInputError("viewerAddress is required for the following feed.");
+      }
+      ensureAddress(viewerAddress, "viewerAddress");
+      if (cursor !== undefined) params.set("cursor", cursor);
+      path = `/api/feed/following/${encodeURIComponent(viewerAddress)}`;
+    }
+
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}${path}?${params.toString()}`,
+      { headers: { Accept: "application/json" } },
+      this._timeoutMs
+    );
+    if (!response.ok) {
+      throw new NetworkError(`Indexer feed request failed with HTTP ${response.status}.`, {
+        status: response.status,
+        path,
+      });
+    }
+    const result = (await response.json()) as {
+      posts?: IndexerPost[];
+      has_more?: boolean;
+      next_cursor?: string | number | null;
+    };
+    const posts = (result.posts ?? []).map((post) => this.mapIndexerPost(post));
+    const nextCursor =
+      result.next_cursor !== undefined
+        ? (result.next_cursor === null ? null : String(result.next_cursor))
+        : result.has_more && posts.length > 0
+          ? String(Number(cursor ?? "0") + posts.length)
+          : null;
+    return { posts, nextCursor };
+  }
+
+  /** Fetch all blocked addresses for an account, following the indexer's pages. */
+  async getBlockList(address: string): Promise<string[]> {
+    ensureAddress(address, "address");
+    const blocked: string[] = [];
+    let offset = 0;
+    const limit = 100;
+    while (true) {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+      const path = `/api/users/${encodeURIComponent(address)}/blocked?${params.toString()}`;
+      const response = await fetchWithTimeout(
+        `${this._indexerUrl}${path}`,
+        { headers: { Accept: "application/json" } },
+        this._timeoutMs
+      );
+      if (!response.ok) {
+        throw new NetworkError(`Indexer block-list request failed with HTTP ${response.status}.`, {
+          status: response.status,
+          address,
+        });
+      }
+      const result = (await response.json()) as { blocked?: string[]; has_more?: boolean };
+      const page = result.blocked ?? [];
+      blocked.push(...page);
+      if (!result.has_more || page.length === 0) return blocked;
+      offset += page.length;
+    }
+  }
+
+  /** Check an indexed follow list, stopping as soon as the target is found. */
+  async isFollowing(follower: string, followee: string): Promise<boolean> {
+    ensureAddress(follower, "follower");
+    ensureAddress(followee, "followee");
+    let cursor = 0;
+    const limit = 100;
+    while (true) {
+      const params = new URLSearchParams({ limit: String(limit), cursor: String(cursor) });
+      const path = `/api/follows/${encodeURIComponent(follower)}/following?${params.toString()}`;
+      const response = await fetchWithTimeout(
+        `${this._indexerUrl}${path}`,
+        { headers: { Accept: "application/json" } },
+        this._timeoutMs
+      );
+      if (!response.ok) {
+        throw new NetworkError(`Indexer following request failed with HTTP ${response.status}.`, {
+          status: response.status,
+          follower,
+        });
+      }
+      const result = (await response.json()) as {
+        following?: string[];
+        next_cursor?: string | null;
+      };
+      const page = result.following ?? [];
+      if (page.includes(followee)) return true;
+      if (result.next_cursor === null || result.next_cursor === undefined || page.length === 0) {
+        return false;
+      }
+      const next = Number(result.next_cursor);
+      if (!Number.isSafeInteger(next) || next <= cursor) {
+        throw new NetworkError("Indexer returned an invalid following cursor.", {
+          cursor: result.next_cursor,
+        });
+      }
+      cursor = next;
+    }
+  }
+
+  private mapIndexerPost(post: IndexerPost): Post {
+    const rawTimestamp = post.timestamp ?? post.created_at ?? 0;
+    const timestamp =
+      typeof rawTimestamp === "string" && !/^\d+$/.test(rawTimestamp)
+        ? Math.floor(Date.parse(rawTimestamp) / 1000)
+        : Number(rawTimestamp);
+    if (!Number.isFinite(timestamp)) {
+      throw new NetworkError("Indexer returned a post with an invalid timestamp.", {
+        postId: post.id,
+      });
+    }
+    return {
+      id: BigInt(post.id),
+      author: post.author,
+      content: post.content,
+      timestamp: BigInt(timestamp),
+      like_count: BigInt(post.like_count ?? 0),
+      tip_total: BigInt(post.tip_total ?? 0),
+    };
   }
 
   /**
@@ -807,6 +1061,30 @@ export class LinkoraClient extends GeneratedLinkoraClient {
     }
   }
 
+  /** Fetch a following-list page using an opaque offset cursor. */
+  async getFollowingPage(user: string, options: CursorPageOptions = {}): Promise<CursorPage<string>> {
+    const { limit, offset } = normalizeCursorPage(options);
+    const items = await super.getFollowing(user, offset, limit);
+    return makeCursorPage(items, limit, offset);
+  }
+
+  /** Fetch a follower-list page using an opaque offset cursor. */
+  async getFollowersPage(user: string, options: CursorPageOptions = {}): Promise<CursorPage<string>> {
+    const { limit, offset } = normalizeCursorPage(options);
+    const items = await super.getFollowers(user, offset, limit);
+    return makeCursorPage(items, limit, offset);
+  }
+
+  /** Fetch an author's post-ID page using an opaque offset cursor. */
+  async getPostsByAuthorPage(
+    author: string,
+    options: CursorPageOptions = {}
+  ): Promise<CursorPage<bigint>> {
+    const { limit, offset } = normalizeCursorPage(options);
+    const items = await super.getPostsByAuthor(author, offset, limit);
+    return makeCursorPage(items, limit, offset);
+  }
+
   /**
    * Batch multiple contract read/simulation operations into a single RPC roundtrip.
    *
@@ -1100,6 +1378,199 @@ export class LinkoraClient extends GeneratedLinkoraClient {
 
   // ── Governance convenience overrides ──────────────────────────────────────
 
+  /** Fetch an indexed governance proposal. Unknown IDs return null. */
+  async getProposal(proposalId: number | bigint | string): Promise<GovProposal | null> {
+    const id = normalizePositiveId(proposalId, "proposalId");
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}/governance/proposals/${id}`,
+      undefined,
+      this._timeoutMs
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new NetworkError(`Indexer returned HTTP ${response.status} for governance proposal.`, {
+        status: response.status,
+        proposalId: id,
+      });
+    }
+    const body = (await response.json()) as { proposal?: Record<string, unknown> } & Record<string, unknown>;
+    return normalizeIndexerProposal(body.proposal ?? body);
+  }
+
+  /** List indexed proposals with optional status filtering and cursor pagination. */
+  async listProposals(options: GovernanceProposalListOptions = {}): Promise<GovernanceProposalList> {
+    const { status, cursor, limit = 20 } = options;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new ValidationError("limit must be an integer between 1 and 100.");
+    }
+    if (cursor !== undefined && !/^\d+$/.test(cursor)) {
+      throw new ValidationError("cursor must be a non-negative numeric offset.");
+    }
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (status) query.set("status", status);
+    if (cursor) query.set("cursor", cursor);
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}/governance/proposals?${query.toString()}`,
+      undefined,
+      this._timeoutMs
+    );
+    if (!response.ok) {
+      throw new NetworkError(`Indexer returned HTTP ${response.status} while listing proposals.`, {
+        status: response.status,
+      });
+    }
+    const body = (await response.json()) as {
+      proposals?: Record<string, unknown>[];
+      nextCursor?: string | null;
+      next_cursor?: string | null;
+    };
+    return {
+      proposals: (body.proposals ?? []).map(normalizeIndexerProposal),
+      nextCursor: body.nextCursor ?? body.next_cursor ?? null,
+    };
+  }
+
+  /** Fetch voting power from the indexer for a wallet address. */
+  async getVotingPower(address: string): Promise<bigint> {
+    ensureAddress(address, "address");
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}/governance/voting-power/${encodeURIComponent(address)}`,
+      undefined,
+      this._timeoutMs
+    );
+    if (!response.ok) {
+      throw new NetworkError(`Indexer returned HTTP ${response.status} for voting power.`, {
+        status: response.status,
+        address,
+      });
+    }
+    const body = (await response.json()) as { votingPower?: string | number | bigint; voting_power?: string | number | bigint };
+    const value = body.votingPower ?? body.voting_power ?? 0;
+    try {
+      return BigInt(value);
+    } catch (cause) {
+      throw new LinkoraError("Indexer returned invalid voting power.", "INVALID_RESPONSE", { address }, cause);
+    }
+  }
+
+  /** Submit a governance proposal through the SDK transaction queue. */
+  async createProposal(
+    proposer: string,
+    parameter: GovParameter,
+    newValue: number | bigint,
+    newAddress: string | null,
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions
+  ): Promise<{ proposalId: bigint }> {
+    ensureAddress(proposer, "proposer");
+    ensureGovParameter(parameter);
+    ensureInteger(newValue, "newValue");
+    if (newAddress !== null) ensureAddress(newAddress, "newAddress");
+    const source = await this.getAccountForTx(proposer, horizonUrl);
+    const tx = await this.prepareTransaction(
+      "gov_propose",
+      source,
+      scvAddress(proposer),
+      nativeToScVal(parameter),
+      scvU64(newValue),
+      nativeToScVal(newAddress)
+    );
+    const hash = await this.submitTransaction(tx, signer, opts);
+    const response = await this._rpcServer.getTransaction(hash);
+    const returnValue = (response as unknown as { returnValue?: xdr.ScVal }).returnValue;
+    if (!returnValue) {
+      throw new LinkoraError("Confirmed proposal transaction did not include its proposal ID.", "INVALID_RESPONSE", { hash });
+    }
+    const value = scValToNative(returnValue);
+    try {
+      return { proposalId: BigInt(value as string | number | bigint) };
+    } catch (cause) {
+      throw new LinkoraError("Proposal transaction returned an invalid proposal ID.", "INVALID_RESPONSE", { hash }, cause);
+    }
+  }
+
+  /** Submit a vote (`true`/`for` or `false`/`against`) through the transaction queue. */
+  async vote(
+    voter: string,
+    proposalId: number | bigint,
+    choice: boolean | "for" | "against",
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions
+  ): Promise<{ txHash: string }> {
+    ensureAddress(voter, "voter");
+    const id = ensurePositiveInteger(proposalId, "proposalId");
+    const support = typeof choice === "boolean" ? choice : choice === "for";
+    const source = await this.getAccountForTx(voter, horizonUrl);
+    const tx = await this.prepareTransaction(
+      "gov_vote",
+      source,
+      scvAddress(voter),
+      scvU64(id),
+      nativeToScVal(support)
+    );
+    return { txHash: await this.submitTransaction(tx, signer, opts) };
+  }
+
+  /** Build, validate, and queue a pool withdrawal against its on-chain M-of-N policy. */
+  async withdraw(
+    signers: string[],
+    poolId: string,
+    amount: number | bigint,
+    recipient: string,
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions
+  ): Promise<{ txHash: string }> {
+    ensureAddressList(signers, "signers");
+    ensureNonEmptyString(poolId, "poolId");
+    const withdrawalAmount = ensurePositiveInteger(amount, "amount");
+    ensureAddress(recipient, "recipient");
+    if (new Set(signers).size !== signers.length) {
+      throw new ValidationError("Withdrawal signers must be unique.", { poolId });
+    }
+    const pool = await this.getPool(poolId);
+    if (!pool) throw new NotFoundError(`Pool ${poolId} was not found.`, { poolId });
+    const admins = await this.getPoolAdmins(poolId);
+    if (!admins) throw new NotFoundError(`Pool ${poolId} was not found.`, { poolId });
+    const unauthorized = signers.filter((address) => !admins.includes(address));
+    if (unauthorized.length) {
+      throw new UnauthorizedError("Every withdrawal signer must be a pool admin.", {
+        poolId,
+        unauthorizedSigners: unauthorized,
+      });
+    }
+    if (signers.length < pool.threshold) {
+      throw new ValidationError(
+        `Pool withdrawal requires ${pool.threshold} admin signatures; received ${signers.length}.`,
+        { poolId, requiredThreshold: pool.threshold, providedSigners: signers.length }
+      );
+    }
+    if (pool.balance < withdrawalAmount) {
+      throw new InsufficientBalanceError("Pool balance is insufficient for this withdrawal.", {
+        poolId,
+        available: pool.balance.toString(),
+        required: withdrawalAmount.toString(),
+      });
+    }
+    const xdrString = await this.preparePoolWithdrawTx(signers, poolId, amount, recipient, horizonUrl);
+    try {
+      return { txHash: await this.submitTransaction(xdrString, signer, opts) };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      if (/insufficient signers|threshold/i.test(message)) {
+        throw new LinkoraError(
+          `Pool withdrawal failed to meet its ${pool.threshold}-of-${admins.length} admin threshold.`,
+          "POOL_THRESHOLD_NOT_MET",
+          { poolId, requiredThreshold: pool.threshold, providedSigners: signers.length },
+          cause
+        );
+      }
+      throw cause;
+    }
+  }
+
   /**
    * Propose a change to a governance parameter.
    *
@@ -1258,6 +1729,29 @@ export class LinkoraClient extends GeneratedLinkoraClient {
     return super.setProfile(user, username, creatorToken);
   }
 
+  /** Build, simulate, and submit a set_profile transaction through the transaction queue. */
+  async submitSetProfile(
+    user: string,
+    username: string,
+    creatorToken: string,
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions,
+  ): Promise<string> {
+    ensureAddress(user, "user");
+    ensureNonEmptyString(username, "username");
+    ensureAddress(creatorToken, "creatorToken");
+    const sourceAccount = await this.getAccountForTx(user, horizonUrl);
+    const tx = await this.prepareTransaction(
+      "set_profile",
+      sourceAccount,
+      scvAddress(user),
+      scvString(username),
+      scvAddress(creatorToken),
+    );
+    return this.submitTransaction(tx, signer, opts);
+  }
+
   /**
    * Delete a user's profile.
    *
@@ -1290,7 +1784,7 @@ export class LinkoraClient extends GeneratedLinkoraClient {
    */
   createPost(author: string, content: string): string {
     ensureAddress(author, "author");
-    ensureNonEmptyString(content, "content");
+    validatePostContent(content);
     return super.createPost(author, content);
   }
 
@@ -1304,13 +1798,55 @@ export class LinkoraClient extends GeneratedLinkoraClient {
    */
   async prepareCreatePostTx(author: string, content: string, horizonUrl?: string): Promise<string> {
     ensureAddress(author, "author");
-    ensureNonEmptyString(content, "content");
+    validatePostContent(content);
     const sourceAccount = await this.getAccountForTx(author, horizonUrl);
     const tx = await this.prepareTransaction(
       "create_post",
       sourceAccount,
       scvAddress(author),
       scvString(content)
+    );
+    return tx.toEnvelope().toXDR("base64");
+  }
+
+  /** Submit a post and return its contract-assigned post ID after confirmation. */
+  async createPostAndSubmit(
+    author: string,
+    content: string,
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions,
+  ): Promise<{ postId: bigint }> {
+    const transactionXdr = await this.prepareCreatePostTx(author, content, horizonUrl);
+    const hash = await this.submitTransaction(transactionXdr, signer, opts);
+    const result = await this._rpcServer.getTransaction(hash);
+    if (!("returnValue" in result) || !result.returnValue) {
+      throw new Error("Confirmed create_post transaction did not include a return value.");
+    }
+    const value = scValToNative(result.returnValue);
+    if (typeof value !== "bigint" && typeof value !== "number") {
+      throw new Error("create_post returned an invalid post ID.");
+    }
+    return { postId: BigInt(value) };
+  }
+
+  /** Build and simulate set_profile, returning an unsigned envelope for wallet signing. */
+  async prepareSetProfileTx(
+    user: string,
+    username: string,
+    creatorToken: string,
+    horizonUrl?: string,
+  ): Promise<string> {
+    ensureAddress(user, "user");
+    ensureNonEmptyString(username, "username");
+    ensureAddress(creatorToken, "creatorToken");
+    const sourceAccount = await this.getAccountForTx(user, horizonUrl);
+    const tx = await this.prepareTransaction(
+      "set_profile",
+      sourceAccount,
+      scvAddress(user),
+      scvString(username),
+      scvAddress(creatorToken),
     );
     return tx.toEnvelope().toXDR("base64");
   }
@@ -1374,6 +1910,18 @@ export class LinkoraClient extends GeneratedLinkoraClient {
     return tx.toEnvelope().toXDR("base64");
   }
 
+  /** Build and submit a follow through the transaction queue. The contract makes repeats idempotent. */
+  async submitFollow(
+    follower: string,
+    followee: string,
+    signer: QueueSigner,
+    opts?: RunOptions,
+    horizonUrl?: string
+  ): Promise<string> {
+    const tx = await this.prepareFollowTx(follower, followee, horizonUrl);
+    return this.submitTransaction(tx, signer, opts);
+  }
+
   /**
    * Unfollow a user.
    *
@@ -1414,6 +1962,70 @@ export class LinkoraClient extends GeneratedLinkoraClient {
       sourceAccount,
       scvAddress(follower),
       scvAddress(followee)
+    );
+    return tx.toEnvelope().toXDR("base64");
+  }
+
+  /** Build and submit an unfollow through the transaction queue. Repeats are safe no-ops on-chain. */
+  async submitUnfollow(
+    follower: string,
+    followee: string,
+    signer: QueueSigner,
+    opts?: RunOptions,
+    horizonUrl?: string
+  ): Promise<string> {
+    const tx = await this.prepareUnfollowTx(follower, followee, horizonUrl);
+    return this.submitTransaction(tx, signer, opts);
+  }
+
+  /** Build and submit a block operation through the transaction queue. */
+  async submitBlock(
+    blocker: string,
+    blocked: string,
+    signer: QueueSigner,
+    opts?: RunOptions,
+    horizonUrl?: string
+  ): Promise<string> {
+    const tx = await this.prepareBlockTx(blocker, blocked, horizonUrl);
+    return this.submitTransaction(tx, signer, opts);
+  }
+
+  /** Build a submittable block_user transaction with the blocker as source account. */
+  async prepareBlockTx(blocker: string, blocked: string, horizonUrl?: string): Promise<string> {
+    ensureAddress(blocker, "blocker");
+    ensureAddress(blocked, "blocked");
+    const sourceAccount = await this.getAccountForTx(blocker, horizonUrl);
+    const tx = await this.prepareTransaction(
+      "block_user",
+      sourceAccount,
+      scvAddress(blocker),
+      scvAddress(blocked)
+    );
+    return tx.toEnvelope().toXDR("base64");
+  }
+
+  /** Build and submit an unblock operation through the transaction queue. */
+  async submitUnblock(
+    blocker: string,
+    blocked: string,
+    signer: QueueSigner,
+    opts?: RunOptions,
+    horizonUrl?: string
+  ): Promise<string> {
+    const tx = await this.prepareUnblockTx(blocker, blocked, horizonUrl);
+    return this.submitTransaction(tx, signer, opts);
+  }
+
+  /** Build a submittable unblock_user transaction with the blocker as source account. */
+  async prepareUnblockTx(blocker: string, blocked: string, horizonUrl?: string): Promise<string> {
+    ensureAddress(blocker, "blocker");
+    ensureAddress(blocked, "blocked");
+    const sourceAccount = await this.getAccountForTx(blocker, horizonUrl);
+    const tx = await this.prepareTransaction(
+      "unblock_user",
+      sourceAccount,
+      scvAddress(blocker),
+      scvAddress(blocked)
     );
     return tx.toEnvelope().toXDR("base64");
   }
@@ -1500,6 +2112,105 @@ export class LinkoraClient extends GeneratedLinkoraClient {
     return tx.toEnvelope().toXDR("base64");
   }
 
+  /** List tips made to one post, newest first, using numeric offset cursors. */
+  async getTipsByPost(
+    postId: number | bigint,
+    options: TipHistoryOptions = {}
+  ): Promise<TipHistoryPage> {
+    const id = ensurePositiveInteger(postId, "postId");
+    return this.listTipRecords(`/tips/by-post/${id}`, options);
+  }
+
+  /** List tips received by a wallet across all of its posts. */
+  async getTipsReceived(
+    address: string,
+    options: TipHistoryOptions = {}
+  ): Promise<TipHistoryPage> {
+    ensureAddress(address, "address");
+    return this.listTipRecords(`/tips/received/${encodeURIComponent(address)}`, options);
+  }
+
+  /** List tips sent by a wallet. */
+  async getTipsSent(
+    address: string,
+    options: TipHistoryOptions = {}
+  ): Promise<TipHistoryPage> {
+    ensureAddress(address, "address");
+    return this.listTipRecords(`/tips/sent/${encodeURIComponent(address)}`, options);
+  }
+
+  /** Aggregate sent and received tips over the half-open `[from, to)` interval. */
+  async getTipTotals(
+    address: string,
+    from?: Date | string,
+    to?: Date | string
+  ): Promise<TipTotals> {
+    ensureAddress(address, "address");
+    const start = normalizeDate(from, "from");
+    const end = normalizeDate(to, "to");
+    if (start && end && start >= end) {
+      throw new ValidationError("from must be earlier than to.");
+    }
+    const query = new URLSearchParams();
+    if (start) query.set("from", start.toISOString());
+    if (end) query.set("to", end.toISOString());
+    const queryString = query.toString();
+    const suffix = queryString ? `?${queryString}` : "";
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}/tips/totals/${encodeURIComponent(address)}${suffix}`,
+      undefined,
+      this._timeoutMs
+    );
+    if (!response.ok) {
+      throw new NetworkError(`Indexer returned HTTP ${response.status} for tip totals.`, {
+        status: response.status,
+        address,
+      });
+    }
+    const body = (await response.json()) as Record<string, unknown>;
+    return {
+      sentCount: Number(body.sent_count ?? 0),
+      sentAmount: BigInt((body.sent_amount ?? 0) as string | number | bigint),
+      sentFee: BigInt((body.sent_fee ?? 0) as string | number | bigint),
+      receivedCount: Number(body.received_count ?? 0),
+      receivedAmount: BigInt((body.received_amount ?? 0) as string | number | bigint),
+      receivedFee: BigInt((body.received_fee ?? 0) as string | number | bigint),
+    };
+  }
+
+  private async listTipRecords(path: string, options: TipHistoryOptions): Promise<TipHistoryPage> {
+    const { limit = 20, cursor = "0" } = options;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new ValidationError("limit must be an integer between 1 and 100.");
+    }
+    if (!/^\d+$/.test(cursor) || !Number.isSafeInteger(Number(cursor))) {
+      throw new ValidationError("cursor must be a non-negative numeric offset.");
+    }
+    const query = new URLSearchParams({ limit: String(limit), cursor });
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}${path}?${query.toString()}`,
+      undefined,
+      this._timeoutMs
+    );
+    if (!response.ok) {
+      throw new NetworkError(`Indexer returned HTTP ${response.status} for tip history.`, {
+        status: response.status,
+        path,
+      });
+    }
+    const body = (await response.json()) as {
+      tips?: Array<Record<string, unknown>>;
+      total?: number;
+      next_cursor?: string | null;
+      nextCursor?: string | null;
+    };
+    return {
+      tips: (body.tips ?? []).map(normalizeTipRecord),
+      total: Number(body.total ?? 0),
+      nextCursor: body.nextCursor ?? body.next_cursor ?? null,
+    };
+  }
+
   /**
    * Tip the author of a post.
    *
@@ -1554,6 +2265,81 @@ export class LinkoraClient extends GeneratedLinkoraClient {
       scvI128(amount)
     );
     return tx.toEnvelope().toXDR("base64");
+  }
+
+  /** Check the token balance, prepare the contract's fee-split tip call, and submit it via the queue. */
+  async sendTip(
+    tipper: string,
+    postId: number | bigint,
+    token: string,
+    amount: number | bigint,
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions
+  ): Promise<{ txHash: string }> {
+    ensureAddress(tipper, "tipper");
+    ensurePositiveInteger(postId, "postId");
+    ensureAddress(token, "token");
+    const amountBigInt = ensurePositiveInteger(amount, "amount");
+
+    const feeBps = await this.getFeeBps();
+    if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 10_000) {
+      throw new LinkoraError("Contract returned an invalid platform fee rate.", "INVALID_RESPONSE", {
+        feeBps,
+      });
+    }
+    // Keep the contract's floor-rounded fee calculation explicit for validation
+    // and parity: the contract transfers this share to treasury and the balance
+    // check covers the full gross amount supplied to `tip`.
+    const feeAmount = (amountBigInt * BigInt(feeBps)) / 10_000n;
+    const authorAmount = amountBigInt - feeAmount;
+    if (feeAmount < 0n || authorAmount < 0n) {
+      throw new LinkoraError("Contract returned an invalid platform fee split.", "INVALID_RESPONSE");
+    }
+
+    const balance = await this.getSep41Balance(tipper, token, horizonUrl);
+    if (balance < amountBigInt) {
+      throw new InsufficientBalanceError("Insufficient token balance to send this tip.", {
+        tipper,
+        token,
+        available: balance.toString(),
+        required: amountBigInt.toString(),
+      });
+    }
+
+    const xdrString = await this.prepareTipTx(tipper, postId, token, amountBigInt, horizonUrl);
+    return { txHash: await this.submitTransaction(xdrString, signer, opts) };
+  }
+
+  private async getSep41Balance(
+    owner: string,
+    token: string,
+    horizonUrl?: string
+  ): Promise<bigint> {
+    const source = await this.getAccountForTx(owner, horizonUrl);
+    const transaction = new TransactionBuilder(source, {
+      fee: "100",
+      networkPassphrase: this._networkPassphrase,
+    })
+      .addOperation(new Contract(token).call("balance", scvAddress(owner)))
+      .setTimeout(DEFAULT_TIMEOUT)
+      .build();
+    const simulation = await this._rpcServer.simulateTransaction(transaction);
+    if (isSimulationError(simulation)) {
+      throw mapError(simulation.error);
+    }
+    if (!isSimulationSuccess(simulation) || !simulation.result?.retval) {
+      throw new SimulationError("Unable to read token balance from simulation.", undefined, simulation);
+    }
+    const raw = scValToNative(simulation.result.retval);
+    try {
+      return BigInt(raw as string | number | bigint);
+    } catch (cause) {
+      throw new LinkoraError("Token contract returned an invalid balance.", "INVALID_RESPONSE", {
+        token,
+        owner,
+      }, cause);
+    }
   }
 
   /**
@@ -1631,6 +2417,29 @@ export class LinkoraClient extends GeneratedLinkoraClient {
     return tx.toEnvelope().toXDR("base64");
   }
 
+  /** Create a pool on-chain through the transaction queue and return its identifier and tx hash. */
+  async createPoolAndSubmit(
+    admin: string,
+    poolId: string,
+    token: string,
+    initialAdmins: string[],
+    threshold: number | bigint,
+    signer: QueueSigner,
+    opts?: RunOptions,
+    horizonUrl?: string
+  ): Promise<{ poolId: string; transactionHash: string }> {
+    const tx = await this.prepareCreatePoolTx(
+      admin,
+      poolId,
+      token,
+      initialAdmins,
+      threshold,
+      horizonUrl
+    );
+    const transactionHash = await this.submitTransaction(tx, signer, opts);
+    return { poolId, transactionHash };
+  }
+
   /**
    * Deposit tokens into a pool.
    *
@@ -1685,6 +2494,21 @@ export class LinkoraClient extends GeneratedLinkoraClient {
       scvI128(amount)
     );
     return tx.toEnvelope().toXDR("base64");
+  }
+
+  /** Deposit a positive token amount into a pool through the transaction queue. */
+  async depositToPoolAndSubmit(
+    depositor: string,
+    poolId: string,
+    token: string,
+    amount: number | bigint,
+    signer: QueueSigner,
+    opts?: RunOptions,
+    horizonUrl?: string
+  ): Promise<string> {
+    ensurePositiveInteger(amount, "amount");
+    const tx = await this.preparePoolDepositTx(depositor, poolId, token, amount, horizonUrl);
+    return this.submitTransaction(tx, signer, opts);
   }
 
   /**

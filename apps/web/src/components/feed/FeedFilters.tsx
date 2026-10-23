@@ -2,8 +2,7 @@
  * @module FeedFilters
  *
  * Renders the tab-based filter bar that lets users switch between the
- * **Explore** (all posts) and **Following** (posts from followed accounts)
- * feed views.
+ * **Explore**, **Following**, and **Trending** feed views.
  *
  * The component is intentionally stateless — it receives the current active
  * tab and a change handler from its parent so the parent can drive data
@@ -35,12 +34,13 @@ import React from "react";
 /**
  * The set of top-level feed views the user can switch between.
  *
- * | Value       | Description                                      |
- * |-------------|--------------------------------------------------|
- * | `"explore"` | Shows all public posts, newest first.            |
- * | `"following"` | Shows posts from accounts the viewer follows.  |
+ * | Value         | Description                                      |
+ * |---------------|--------------------------------------------------|
+ * | `"explore"`   | Shows all public posts, newest first.            |
+ * | `"following"` | Shows posts from accounts the viewer follows.    |
+ * | `"trending"`  | Shows posts with strong recent engagement.       |
  */
-export type FeedTab = "explore" | "following";
+export type FeedTab = "explore" | "following" | "trending";
 
 // ─── Props interface ──────────────────────────────────────────────────────────
 
@@ -83,6 +83,7 @@ export interface FeedFiltersProps {
 const TABS: { id: FeedTab; label: string }[] = [
   { id: "explore", label: "Explore" },
   { id: "following", label: "Following" },
+  { id: "trending", label: "Trending" },
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -90,7 +91,7 @@ const TABS: { id: FeedTab; label: string }[] = [
 /**
  * Tab-based filter bar for the Linkora feed.
  *
- * Renders a horizontal list of tab buttons (Explore / Following). The active
+ * Renders a horizontal list of tab buttons (Explore / Following / Trending). The active
  * tab is highlighted with a violet underline accent. Switching tabs calls
  * `onTabChange` so the parent can update its feed query.
  *

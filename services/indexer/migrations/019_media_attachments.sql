@@ -7,7 +7,7 @@
 
 CREATE TABLE IF NOT EXISTS media_attachments (
     id           BIGSERIAL PRIMARY KEY,
-    post_id      TEXT      NOT NULL,
+    post_id      BIGINT    NOT NULL,
     media_type   TEXT      NOT NULL CHECK (media_type IN ('image', 'video', 'audio')),
     url          TEXT      NOT NULL,
     content_hash TEXT      NOT NULL,
