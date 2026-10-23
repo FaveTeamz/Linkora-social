@@ -1,6 +1,8 @@
 # Media Service
 
-The media service is embedded inside the **indexer** (`services/indexer`). It
+The upload API is also embedded inside the **indexer** (`services/indexer`). The
+standalone media service in this directory handles image processing and is
+configured independently through `services/media/.env.example`. It
 exposes two HTTP endpoints under `/api/posts/media` that handle file uploads,
 serve previously-uploaded files, and report the server's upload budget to
 clients.
@@ -243,6 +245,13 @@ extend `src/api/routes/posts.ts` to use the AWS SDK / R2 SDK directly and set
 ---
 
 ## Local Development
+
+The standalone service listens on `HOST` and `PORT` (defaults `0.0.0.0` and
+`3003`). Set `MEDIA_BUCKET`, `MEDIA_ENDPOINT`, `MEDIA_ACCESS_KEY`, and
+`MEDIA_SECRET_KEY` for S3-compatible storage integrations. `MAX_FILE_SIZE_MB`
+sets its upload ceiling. Public links use `CDN_BASE_URL`; private CDN links
+require `CDN_SIGNING_SECRET` and receive a bounded, time-limited HMAC signature.
+The root `docker-compose.yml` includes the service for local development.
 
 The media endpoints start automatically with the indexer. No additional setup
 is required beyond the standard quick-start:
