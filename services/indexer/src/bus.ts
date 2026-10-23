@@ -35,6 +35,23 @@ export interface BusEvent {
 export const ALL_EVENTS = "*";
 export const DEFAULT_MAX_LISTENERS = 100;
 
+/**
+ * Canonical channel names for the search indexer. Contract events arrive with
+ * PascalCase types (e.g. "PostCreated"); the search indexer subscribes to the
+ * snake_case aliases below. Both spellings are published so consumers can use
+ * whichever convention they prefer.
+ */
+export const POST_CREATED = "post_created";
+export const POST_DELETED = "post_deleted";
+export const PROFILE_UPDATED = "profile_updated";
+
+/** Map a contract event type to its snake_case search-indexer channel. */
+const SEARCH_CHANNEL_ALIASES: Record<string, string> = {
+  PostCreated: POST_CREATED,
+  PostDeleted: POST_DELETED,
+  ProfileUpdated: PROFILE_UPDATED,
+};
+
 export type BusListener = (event: BusEvent) => void;
 
 export class EventBus {
@@ -87,9 +104,17 @@ export class EventBus {
    * Publish an event. Delivered synchronously to the type-specific channel
    * and to the wildcard channel. Listener exceptions are isolated so one bad
    * consumer cannot break fanout to the others.
+   *
+   * For the search-relevant contract events, the event is also delivered on
+   * its snake_case alias channel (e.g. "PostCreated" -> "post_created") so
+   * the search indexer can subscribe using the documented channel names.
    */
   publish(event: BusEvent): void {
     this.safeEmit(event.type, event);
+    const alias = SEARCH_CHANNEL_ALIASES[event.type];
+    if (alias && alias !== event.type) {
+      this.safeEmit(alias, event);
+    }
     this.safeEmit(ALL_EVENTS, event);
   }
 
