@@ -148,6 +148,9 @@ export interface UseFeedStateReturn {
    */
   loadingMore: boolean;
 
+  /** `true` only while an explicit refresh is reloading the first page. */
+  isRefreshing: boolean;
+
   /**
    * An error message string if the fetch operation failed, or `null` if healthy.
    */
@@ -174,6 +177,11 @@ export interface UseFeedStateReturn {
    * @param filter - The new filter to apply.
    */
   setFilter: (filter: FeedFilter) => void;
+
+  /** Current zero-based page cursor used by the feed's offset pagination. */
+  cursor: number;
+  /** Selects a page cursor and loads that page. */
+  setCursor: (cursor: number) => void;
 
   /**
    * The currently active sort order applied to the posts.
@@ -453,6 +461,7 @@ export function useFeedState(options: UseFeedStateOptions = {}): UseFeedStateRet
   );
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -524,7 +533,15 @@ export function useFeedState(options: UseFeedStateOptions = {}): UseFeedStateRet
     setPage(0);
     setRawPosts([]);
     fetchInProgressRef.current = false;
-  }, []);
+    void fetchPage(0, true);
+  }, [fetchPage]);
+
+  const setCursor = useCallback((nextCursor: number) => {
+    if (!Number.isInteger(nextCursor) || nextCursor < 0) return;
+    setPage(nextCursor);
+    fetchInProgressRef.current = false;
+    void fetchPage(nextCursor, nextCursor === 0);
+  }, [fetchPage]);
 
   const setSortOrder = useCallback((nextSort: FeedSortOrder) => {
     setSortOrderState(nextSort);
@@ -540,18 +557,22 @@ export function useFeedState(options: UseFeedStateOptions = {}): UseFeedStateRet
     setPage(0);
     setRawPosts([]);
     fetchInProgressRef.current = false;
-    fetchPage(0, true);
+    setIsRefreshing(true);
+    void fetchPage(0, true).finally(() => setIsRefreshing(false));
   }, [fetchPage]);
 
   return {
     posts,
     loading,
     loadingMore,
+    isRefreshing,
     error,
     hasMore,
     totalCount,
     filter,
     setFilter,
+    cursor: page,
+    setCursor,
     sortOrder,
     setSortOrder,
     loadMore,
