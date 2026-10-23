@@ -122,6 +122,34 @@ BEGIN
         RAISE EXCEPTION 'idx_reports_status index is missing';
     END IF;
 
+    -- Reputation leaderboard queries must work on an empty table, and the
+    -- score index must order entries descending for the leaderboard.
+    PERFORM user_address, score
+    FROM reputation_scores
+    ORDER BY score DESC
+    LIMIT 1;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_index i
+        JOIN pg_class idx ON idx.oid = i.indexrelid
+        WHERE idx.relname = 'idx_reputation_scores_score'
+          AND i.indrelid = 'reputation_scores'::regclass
+          AND i.indisvalid
+          AND (i.indoption[0] & 1) = 1
+    ) THEN
+        RAISE EXCEPTION 'reputation score leaderboard index must sort score descending';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'notifications'
+          AND column_name = 'read_at'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_indexes WHERE indexname = 'idx_notifications_unread'
+    ) THEN
+        RAISE EXCEPTION 'notifications table or unread index is missing';
+    END IF;
+
     RAISE NOTICE 'schema verification passed: % base tables, post_scores view, all constraints present',
         array_length(expected_tables, 1);
 END $$;

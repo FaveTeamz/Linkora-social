@@ -165,8 +165,39 @@ function EarningsDashboard({ data }: { data: AnalyticsData }) {
   const totalXlm = summary.totalTipsXlm;
   const tippedPosts = tipEarnings.filter((p) => p.earnings > 0).length;
 
+  const exportCsv = useCallback(() => {
+    const escapeCsv = (value: string) => `"${value.replaceAll('"', '""')}"`;
+    const rows = [
+      ["date", "earnings_stroops", "earnings_xlm"],
+      ...tipEarnings.map((point) => [
+        point.date,
+        String(point.earnings),
+        formatStroops(String(point.earnings)),
+      ]),
+    ];
+    const blob = new Blob([rows.map((row) => row.map(escapeCsv).join(",")).join("\r\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "creator-earnings.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [tipEarnings]);
+
   return (
     <div className="space-y-6" data-testid="earnings-dashboard">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={exportCsv}
+          className="rounded-xl border border-[var(--bg-tertiary)] bg-[var(--bg-secondary)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+          data-testid="export-earnings-csv"
+        >
+          Export CSV
+        </button>
+      </div>
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <SummaryCard
