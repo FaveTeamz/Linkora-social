@@ -200,7 +200,7 @@ export function createApp(
     next();
   });
 
-  app.use("/api/profiles", createProfilesRouter(db));
+  app.use("/api/profiles", createProfilesRouter(db, queryCache));
   app.use("/api/posts", createPostsRouter(db, mediaUpload));
   app.use("/api/search", createSearchRouter(db));
   app.use("/api/follows", createFollowsRouter(db));

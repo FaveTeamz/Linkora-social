@@ -333,6 +333,15 @@ const httpServer = http.createServer(apiApp);
 
 const wsHandle = attachWebSocketServer(httpServer, bus, { path: "/ws" });
 const detachNotificationDispatcher = attachNotificationDispatcher(bus, pgPool, notificationService);
+const detachQueryCacheInvalidation = bus.onAny((event) => {
+  const eventType = event.type.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+  if (eventType === "post_created" || eventType === "post_deleted") {
+    void queryCache.invalidateFeed();
+  }
+  if (eventType === "profile_set" || eventType === "profile_deleted") {
+    void queryCache.invalidateProfiles();
+  }
+});
 
 // ── Lifecycle control ────────────────────────────────────────────────────────
 

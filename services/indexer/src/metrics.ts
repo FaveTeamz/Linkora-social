@@ -39,6 +39,29 @@ export class Counter {
   }
 }
 
+export class Gauge {
+  private value = 0;
+
+  constructor(
+    readonly name: string,
+    readonly help: string
+  ) {}
+
+  set(value: number): void {
+    if (!Number.isFinite(value)) throw new Error("Gauge value must be finite");
+    this.value = value;
+  }
+
+  toPrometheus(): string {
+    return [
+      `# HELP ${this.name} ${this.help}`,
+      `# TYPE ${this.name} gauge`,
+      `${this.name} ${this.value}`,
+      "",
+    ].join("\n");
+  }
+}
+
 export const serializationRetriesTotal = new Counter(
   "serialization_retries_total",
   "Number of PostgreSQL serialization or deadlock retries"
@@ -49,8 +72,22 @@ export const scoreRefreshDeferredTotal = new Counter(
   "Number of post_scores materialized-view refreshes deferred (active concurrent refresh or lock contention)"
 );
 
+export const cacheHitsTotal = new Counter("cache_hits_total", "Number of indexer query cache hits");
+export const cacheMissesTotal = new Counter(
+  "cache_misses_total",
+  "Number of indexer query cache misses"
+);
+export const cacheHitRate = new Gauge(
+  "cache_hit_rate",
+  "Fraction of query cache requests served from cache"
+);
+
 export function metricsText(): string {
-  return [serializationRetriesTotal.toPrometheus(), scoreRefreshDeferredTotal.toPrometheus()].join(
-    ""
-  );
+  return [
+    serializationRetriesTotal.toPrometheus(),
+    scoreRefreshDeferredTotal.toPrometheus(),
+    cacheHitsTotal.toPrometheus(),
+    cacheMissesTotal.toPrometheus(),
+    cacheHitRate.toPrometheus(),
+  ].join("");
 }

@@ -118,7 +118,8 @@ export class GracefulShutdown {
     });
 
     try {
-      await Promise.race([Promise.all([wsClose, pgClose]), timeout]);
+      const cacheClose = this.closeQueryCache?.() ?? Promise.resolve();
+      await Promise.race([Promise.all([wsClose, pgClose, cacheClose]), timeout]);
       if (timeoutId) clearTimeout(timeoutId);
       logger.info({ signal }, "Shutdown complete");
       process.exit(0);
