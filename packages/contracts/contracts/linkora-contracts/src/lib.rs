@@ -13,6 +13,7 @@ mod rewards;
 mod validation;
 
 pub use errors::{ContractError, RentError};
+pub use storage_keys::StorageKey;
 use validation::{
     validate_address_list, validate_amount, validate_gov_parameter, validate_non_default_address,
     validate_protocol_fee, validate_pubkey_32, validate_report_verdict,
@@ -3417,6 +3418,56 @@ impl LinkoraContract {
         .publish(&env);
     }
 
+    /// Finalize a closed vote window. Anyone may submit this transaction; it
+    /// persists Passed or Failed so execution is not dependent on read calls.
+    pub fn gov_finalize(env: Env, proposal_id: u64) -> GovStatus {
+        require_with_error!(&env, proposal_id > 0, "proposal id must be positive");
+        let proposal_key = StorageKey::GovProposal(proposal_id);
+        let mut proposal: GovProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
+            .expect("proposal not found");
+        require_with_error!(
+            &env,
+            proposal.status == GovStatus::Active,
+            "proposal not active"
+        );
+        let vote_end = proposal
+            .created_ledger
+            .saturating_add(proposal.vote_window_ledgers);
+        require_with_error!(&env, env.ledger().sequence() > vote_end, "vote window still open");
+
+        let total_votes = proposal.votes_for.saturating_add(proposal.votes_against);
+        let approval_pct = if total_votes == 0 {
+            0
+        } else {
+            (proposal.votes_for as u64 * 100 / total_votes as u64) as u32
+        };
+        let required_quorum = Self::effective_quorum(env.clone(), proposal_id);
+        proposal.status = if total_votes > 0 && approval_pct >= required_quorum {
+            GovStatus::Passed
+        } else {
+            GovStatus::Failed
+        };
+        env.storage().persistent().set(&proposal_key, &proposal);
+        Self::bump(&env, &proposal_key);
+
+        let open_count_key = StorageKey::GovOpenProposalCount(proposal.proposer.clone());
+        let open_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&open_count_key)
+            .unwrap_or(0);
+        if open_count > 0 {
+            env.storage()
+                .persistent()
+                .set(&open_count_key, &(open_count - 1));
+            Self::bump(&env, &open_count_key);
+        }
+        proposal.status
+    }
+
     /// Computes the effective quorum for a proposal, accounting for time-based
     /// decay. The quorum decays linearly from the initial value toward
     /// `quorum_floor` based on elapsed ledgers since creation.
@@ -3492,9 +3543,10 @@ impl LinkoraContract {
 
         require_with_error!(
             &env,
-            proposal.status == GovStatus::Active,
-            "proposal not active"
+            proposal.status == GovStatus::Active || proposal.status == GovStatus::Passed,
+            "proposal is not executable"
         );
+        let already_finalized = proposal.status == GovStatus::Passed;
 
         let current_ledger = env.ledger().sequence();
         let vote_end = proposal.created_ledger + proposal.vote_window_ledgers;
@@ -3568,18 +3620,20 @@ impl LinkoraContract {
         env.storage().persistent().set(&proposal_key, &proposal);
         Self::bump(&env, &proposal_key);
 
-        // Decrement open proposal count for the proposer.
-        let open_count_key = StorageKey::GovOpenProposalCount(proposal.proposer.clone());
-        let current_open: u32 = env
-            .storage()
-            .persistent()
-            .get(&open_count_key)
-            .unwrap_or(0u32);
-        if current_open > 0 {
-            env.storage()
+        // Finalization already decremented this count for Passed proposals.
+        if !already_finalized {
+            let open_count_key = StorageKey::GovOpenProposalCount(proposal.proposer.clone());
+            let current_open: u32 = env
+                .storage()
                 .persistent()
-                .set(&open_count_key, &(current_open - 1));
-            Self::bump(&env, &open_count_key);
+                .get(&open_count_key)
+                .unwrap_or(0u32);
+            if current_open > 0 {
+                env.storage()
+                    .persistent()
+                    .set(&open_count_key, &(current_open - 1));
+                Self::bump(&env, &open_count_key);
+            }
         }
 
         GovProposalExecutedEvent {

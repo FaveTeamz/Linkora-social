@@ -492,10 +492,9 @@ console.log(`Post #${post.id} has received ${post.tip_total} stroops in tips`);
 
 ## ProfileClient — profile methods
 
-Profile operations are exposed directly on `LinkoraClient`. There is no
-separate `ProfileClient` class — the methods are part of `LinkoraClient`, which extends the
-auto-generated base client with input validation, error normalization, and
-TypeScript convenience wrappers.
+On-chain profile operations are exposed directly on `LinkoraClient`. The SDK
+also provides `ProfileClient` for exact, case-insensitive username resolution
+through the indexer, with a one-minute cache.
 
 ### The `Profile` type
 
@@ -516,6 +515,15 @@ interface Profile {
 | `setProfile(user, username, creatorToken)` | Write (throwaway XDR) | Create or update a profile and link it to a creator token.                 |
 | `deleteProfile(user)`                      | Write (throwaway XDR) | Delete the caller's profile from on-chain storage.                         |
 | `setProfileWithNewToken(params)`           | Write (throwaway XDR) | Deploy a creator token and link it to a new profile in two operations.     |
+
+For indexer-backed username resolution, use `ProfileClient`:
+
+```ts
+import { ProfileClient } from "linkora-sdk";
+
+const profiles = new ProfileClient({ indexerUrl: "https://indexer.linkora.example" });
+const address = await profiles.resolveUsername("Alice"); // Stellar address or null
+```
 
 ---
 

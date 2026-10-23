@@ -1,6 +1,31 @@
 import { PostgresDatabase } from "../postgres-db";
 
 describe("PostgresDatabase analytics and governance counters", () => {
+  it("resolves profile usernames case-insensitively", async () => {
+    const profile = {
+      address: "GADDRESS",
+      username: "alice",
+      creator_token: "GTOKEN",
+      updated_ledger: 42,
+    };
+    const pool = { query: jest.fn().mockResolvedValue({ rows: [profile] }) } as any;
+    const db = new PostgresDatabase(pool);
+
+    await expect(db.getProfileByUsername("Alice")).resolves.toEqual(profile);
+    expect(pool.query.mock.calls[0][0]).toContain("lower(username) = lower($1)");
+    expect(pool.query.mock.calls[0][1]).toEqual(["Alice"]);
+  });
+
+  it("performs case-insensitive prefix profile search with a bounded limit", async () => {
+    const pool = { query: jest.fn().mockResolvedValue({ rows: [] }) } as any;
+    const db = new PostgresDatabase(pool);
+
+    await db.searchProfiles(" ali ", 10);
+
+    expect(pool.query.mock.calls[0][0]).toContain("position(lower($1) in lower(username)) = 1");
+    expect(pool.query.mock.calls[0][1]).toEqual(["ali", 10]);
+  });
+
   it("computes 7d and 30d pool volume with time windows", async () => {
     const pool = {
       query: jest.fn()

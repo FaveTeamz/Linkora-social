@@ -2,6 +2,7 @@ export * from "./cache.js";
 export * from "./errors.js";
 export * from "./generated/types.js";
 export * from "./client.js";
+export * from "./profile-client.js";
 export * from "./credentials.js";
 export * from "./mini-apps/validateManifest.js";
 export * from "./lib/utf8.js";

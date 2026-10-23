@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { Database } from "../../db";
-import { validateParams } from "../../middleware/validate";
+import { validateParams, validateQuery } from "../../middleware/validate";
 import { z } from "zod";
 import { stellarAddressSchema } from "@linkora/types/src/schemas";
 import { notFoundError } from "@linkora/types/src/errors";
@@ -9,6 +9,14 @@ import { profileCacheKey, QueryCache } from "../../cache";
 const getProfileParamsSchema = z.object({
   address: stellarAddressSchema,
 });
+const searchProfileQuerySchema = z.object({
+  username: z.string().trim().min(1).max(64).optional(),
+  q: z.string().trim().min(1).max(64).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+}).refine(
+  (query) => Boolean(query.username) !== Boolean(query.q),
+  "provide exactly one of username or q"
+);
 
 export function createProfilesRouter(db: Database, cache?: QueryCache): Router {
   const router = Router();
