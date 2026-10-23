@@ -32,6 +32,119 @@ fn upload_upgrade_wasm(env: &Env) -> BytesN<32> {
     env.deployer().upload_contract_wasm(wasm)
 }
 
+#[test]
+fn test_reputation_score_clamps_at_zero_and_decays_per_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let user = Address::generate(&env);
+
+    assert_eq!(client.update_reputation_score(&admin, &user, &1_000), 1_000);
+    assert_eq!(client.get_reputation_score(&user), 1_000);
+    env.ledger().set_sequence(17_280 * 2 + 1);
+    assert_eq!(client.apply_reputation_decay(&admin, &user), 902);
+    assert_eq!(client.update_reputation_score(&admin, &user, &-10_000), 0);
+    assert_eq!(client.get_reputation_score(&user), 0);
+}
+
+#[test]
+#[should_panic]
+fn test_reputation_score_overflow_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let user = Address::generate(&env);
+    client.update_reputation_score(&admin, &user, &i64::MAX);
+    client.update_reputation_score(&admin, &user, &1);
+}
+
+#[test]
+fn test_user_moderation_report_and_admin_ban_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let reporter = Address::generate(&env);
+    let target = Address::generate(&env);
+
+    client.report_user(&reporter, &target, &2);
+    client.report_user(&reporter, &target, &2);
+    assert!(!client.is_banned(&target));
+    client.ban(&admin, &target);
+    assert!(client.is_banned(&target));
+    client.unban(&admin, &target);
+    assert!(!client.is_banned(&target));
+}
+
+#[test]
+#[should_panic]
+fn test_banned_user_cannot_follow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let banned = Address::generate(&env);
+    let followee = Address::generate(&env);
+    client.ban(&admin, &banned);
+    client.follow(&banned, &followee);
+}
+
+#[test]
+#[should_panic]
+fn test_ban_prevents_post_creation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let banned = Address::generate(&env);
+    client.ban(&admin, &banned);
+    client.create_post(&banned, &String::from_str(&env, "blocked"));
+}
+
+#[test]
+fn test_reward_distribution_and_single_claim() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let token = setup_token(&env, &admin);
+    let recipient = Address::generate(&env);
+    let mut claims = Map::new(&env);
+    claims.set(recipient.clone(), 500);
+
+    let epoch = client.distribute_rewards(&admin, &token, &claims);
+    assert_eq!(client.get_reward_epoch(), epoch);
+    assert_eq!(client.get_claimable_reward(&recipient, &epoch), 500);
+    assert_eq!(client.claim_reward(&recipient, &epoch), 500);
+    assert_eq!(client.get_claimable_reward(&recipient, &epoch), 0);
+}
+
+#[test]
+#[should_panic]
+fn test_reward_claim_is_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let token = setup_token(&env, &admin);
+    let recipient = Address::generate(&env);
+    let mut claims = Map::new(&env);
+    claims.set(recipient.clone(), 100);
+    let epoch = client.distribute_rewards(&admin, &token, &claims);
+    client.claim_reward(&recipient, &epoch);
+    client.claim_reward(&recipient, &epoch);
+}
+
+#[test]
+#[should_panic]
+fn test_reward_claim_wrong_epoch_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let token = setup_token(&env, &admin);
+    let recipient = Address::generate(&env);
+    let mut claims = soroban_sdk::Map::new(&env);
+    claims.set(recipient.clone(), 100);
+    let epoch = client.distribute_rewards(&admin, &token, &claims);
+
+    client.claim_reward(&recipient, &(epoch + 1));
+}
+
 // ── Credential authority signing helpers ──────────────────────────────────
 //
 // Mirrors `LinkoraContract::credential_root_message_hash` so tests can produce

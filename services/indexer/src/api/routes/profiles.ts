@@ -14,6 +14,25 @@ export function createProfilesRouter(db: Database, cache?: QueryCache): Router {
   const router = Router();
 
   router.get(
+    "/:address/reputation",
+    validateParams(getProfileParamsSchema),
+    async (req: Request, res: Response): Promise<void> => {
+      const { address } = req.params;
+      if (!db.getReputationScore) {
+        res.status(501).json({ error: "Reputation scores are not available" });
+        return;
+      }
+
+      const reputation = await db.getReputationScore(address);
+      if (!reputation) {
+        res.status(404).json({ error: "Reputation score not found" });
+        return;
+      }
+      res.json(reputation);
+    }
+  );
+
+  router.get(
     "/:address",
     validateParams(getProfileParamsSchema),
     async (req: Request, res: Response): Promise<void> => {

@@ -9,6 +9,7 @@ import {
   Pool as PoolModel,
   GovernanceProposal,
   GovernanceVote,
+  ReputationScore,
 } from "./db";
 
 export class PostgresDatabase implements Database {
@@ -44,6 +45,19 @@ export class PostgresDatabase implements Database {
       SELECT address, username, creator_token, updated_ledger
       FROM profiles
       WHERE address = $1
+      `,
+      [address]
+    );
+    return res.rows[0] ?? null;
+  }
+
+  async getReputationScore(address: string): Promise<ReputationScore | null> {
+    const res = await this.pool.query(
+      `
+      SELECT user_address, score, posts_count, tips_sent, tips_received,
+             governance_votes, last_computed_at, updated_ledger
+      FROM reputation_scores
+      WHERE user_address = $1
       `,
       [address]
     );

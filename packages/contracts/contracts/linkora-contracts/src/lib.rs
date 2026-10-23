@@ -7,6 +7,9 @@ use soroban_sdk::{
 };
 
 mod errors;
+mod moderation;
+mod reputation;
+mod rewards;
 mod validation;
 
 pub use errors::{ContractError, RentError};
@@ -69,6 +72,15 @@ pub enum StorageKey {
     PostTipCooldownsCount(u64),    // persistent: post_id -> u32
     PostTipCooldownsIdx(u64, u32), // persistent: (post_id, seq) -> Address
     UpgradeProposal,               // instance: staged WASM upgrade proposal
+    ReputationScore(Address),
+    ReputationDecayLedger(Address),
+    UserReports(Address),
+    UserReport(Address, Address),
+    Banned(Address),
+    RewardEpoch,
+    RewardClaimable(Address, u64),
+    RewardClaimed(Address, u64),
+    RewardToken(u64),
 }
 
 // ── Instance-storage key constants (small scalars, not contracttype) ──────────
@@ -245,6 +257,33 @@ pub struct Report {
     pub reason_hash: BytesN<32>,
     pub created_ledger: u32,
     pub status: ReportStatus,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ModerationReport {
+    pub reporter: Address,
+    pub reason_code: u32,
+    pub reported_ledger: u32,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct RewardDistributionEvent {
+    #[topic]
+    pub epoch: u64,
+    pub recipients: u32,
+    pub total: i128,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct RewardClaimEvent {
+    #[topic]
+    pub epoch: u64,
+    #[topic]
+    pub recipient: Address,
+    pub amount: i128,
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
@@ -1398,6 +1437,12 @@ impl LinkoraContract {
 
         require_with_error!(
             &env,
+            !moderation::is_banned(&env, &follower),
+            "banned users cannot follow"
+        );
+
+        require_with_error!(
+            &env,
             !Self::is_either_blocked(&env, &followee, &follower),
             "blocked: cannot follow — one user has blocked the other"
         );
@@ -1929,6 +1974,106 @@ impl LinkoraContract {
         blocks.contains_key(blocked)
     }
 
+    /// File one idempotent user moderation report using a documented reason code (1–8).
+    pub fn report_user(env: Env, reporter: Address, target: Address, reason_code: u32) {
+        reporter.require_auth();
+        validate_non_default_address(&env, "reporter", &reporter);
+        validate_non_default_address(&env, "target", &target);
+        Self::require_not_paused(&env);
+        moderation::report(&env, &reporter, &target, reason_code);
+        Self::bump(&env, &StorageKey::UserReports(target.clone()));
+        Self::bump(&env, &StorageKey::UserReport(target, reporter));
+    }
+
+    /// Ban a user. Only an account with the Admin role can change ban state.
+    pub fn ban(env: Env, admin: Address, target: Address) {
+        admin.require_auth();
+        validate_non_default_address(&env, "target", &target);
+        Self::require_role(&env, &admin, Role::Admin);
+        moderation::ban(&env, &target);
+        Self::bump(&env, &StorageKey::Banned(target));
+    }
+
+    /// Remove a user's ban. Only an account with the Admin role can change ban state.
+    pub fn unban(env: Env, admin: Address, target: Address) {
+        admin.require_auth();
+        validate_non_default_address(&env, "target", &target);
+        Self::require_role(&env, &admin, Role::Admin);
+        moderation::unban(&env, &target);
+    }
+
+    pub fn is_banned(env: Env, target: Address) -> bool {
+        moderation::is_banned(&env, &target)
+    }
+
+    /// Update a user's reputation score with a signed delta. Negative results clamp to zero.
+    pub fn update_reputation_score(env: Env, admin: Address, user: Address, delta: i64) -> i64 {
+        admin.require_auth();
+        validate_non_default_address(&env, "user", &user);
+        Self::require_role(&env, &admin, Role::Admin);
+        let score = reputation::update_score(&env, &user, delta);
+        Self::bump(&env, &StorageKey::ReputationScore(user.clone()));
+        score
+    }
+
+    pub fn get_reputation_score(env: Env, user: Address) -> i64 {
+        reputation::get_score(&env, &user)
+    }
+
+    /// Apply 5% compound decay for each elapsed 17,280-ledger window.
+    pub fn apply_reputation_decay(env: Env, admin: Address, user: Address) -> i64 {
+        admin.require_auth();
+        validate_non_default_address(&env, "user", &user);
+        Self::require_role(&env, &admin, Role::Admin);
+        let score = reputation::apply_decay(&env, &user);
+        Self::bump(&env, &StorageKey::ReputationScore(user.clone()));
+        Self::bump(&env, &StorageKey::ReputationDecayLedger(user));
+        score
+    }
+
+    /// Fund and create a reward epoch. Claims are immutable once assigned.
+    pub fn distribute_rewards(
+        env: Env,
+        admin: Address,
+        token_address: Address,
+        claims: Map<Address, i128>,
+    ) -> u64 {
+        admin.require_auth();
+        validate_non_default_address(&env, "token", &token_address);
+        Self::require_role(&env, &admin, Role::Admin);
+        let (epoch, recipients, total) =
+            rewards::distribute(&env, &admin, &token_address, &claims);
+        Self::bump(&env, &StorageKey::RewardToken(epoch));
+
+        for (recipient, amount) in claims.iter() {
+            Self::bump(&env, &StorageKey::RewardClaimable(recipient, epoch));
+        }
+
+        RewardDistributionEvent { epoch, recipients, total }.publish(&env);
+        epoch
+    }
+
+    /// Claim a reward once for a specific epoch.
+    pub fn claim_reward(env: Env, recipient: Address, epoch: u64) -> i128 {
+        recipient.require_auth();
+        validate_non_default_address(&env, "recipient", &recipient);
+        let amount = rewards::claim(&env, epoch, &recipient);
+        let claimed_key = StorageKey::RewardClaimed(recipient.clone(), epoch);
+        let claimable_key = StorageKey::RewardClaimable(recipient.clone(), epoch);
+        Self::bump(&env, &claimed_key);
+        Self::bump(&env, &claimable_key);
+        RewardClaimEvent { epoch, recipient, amount }.publish(&env);
+        amount
+    }
+
+    pub fn get_claimable_reward(env: Env, recipient: Address, epoch: u64) -> i128 {
+        rewards::get_claimable(&env, &recipient, epoch)
+    }
+
+    pub fn get_reward_epoch(env: Env) -> u64 {
+        rewards::current_epoch(&env)
+    }
+
     /// Helper: checks if either user has blocked the other (bidirectional check).
     fn is_either_blocked(env: &Env, a: &Address, b: &Address) -> bool {
         Self::is_blocked(env.clone(), a.clone(), b.clone())
@@ -1963,6 +2108,11 @@ impl LinkoraContract {
             format!("content must be at most {max_post_len} characters")
         );
         Self::require_not_paused(&env);
+        require_with_error!(
+            &env,
+            !moderation::is_banned(&env, &author),
+            "banned users cannot create posts"
+        );
 
         let id: u64 = env.storage().instance().get(&POST_CT).unwrap_or(0u64) + 1;
         let key = StorageKey::Post(id);

@@ -105,6 +105,17 @@ export interface GovernanceVote {
   ledger: number;
 }
 
+export interface ReputationScore {
+  user_address: string;
+  score: number;
+  posts_count: number;
+  tips_sent: number;
+  tips_received: number;
+  governance_votes: number;
+  last_computed_at: Date;
+  updated_ledger: number;
+}
+
 export interface Database {
   // Profiles
   upsertProfile(profile: Profile): Promise<void>;
@@ -165,6 +176,7 @@ export interface Database {
 
   // Query methods used by the REST API
   getProfile(address: string): Promise<Profile | null>;
+  getReputationScore?(address: string): Promise<ReputationScore | null>;
   listPosts(filters: {
     author?: string;
     limit: number;
