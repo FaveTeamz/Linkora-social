@@ -1080,6 +1080,24 @@ fn test_like_post_no_event_on_duplicate() {
     );
 }
 
+#[test]
+fn test_like_is_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = setup_contract(&env);
+    let author = Address::generate(&env);
+    let liker = Address::generate(&env);
+    let post_id = client.create_post(&author, &String::from_str(&env, "One like only"));
+
+    client.like_post(&liker, &post_id);
+    let events_after_first_like = env.events().all().events().len();
+    assert_eq!(client.get_like_count(&post_id), 1);
+
+    client.like_post(&liker, &post_id);
+    assert_eq!(client.get_like_count(&post_id), 1);
+    assert_eq!(env.events().all().events().len(), events_after_first_like);
+}
+
 // ── Issue #712: get_like_count returns 0 for post with no likes ───────────────
 
 #[test]
@@ -3606,6 +3624,72 @@ fn test_pool_admin_removed_event() {
     let pool = client.get_pool(&pool_id).unwrap();
     assert_eq!(pool.admins.len(), 2);
     assert!(!pool.admins.iter().any(|a| a == pool_admin3));
+}
+
+#[test]
+fn test_pool_deposit_anyone_can_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let pool_admin = Address::generate(&env);
+    let depositor = Address::generate(&env);
+    let token = setup_token(&env, &pool_admin);
+    StellarAssetClient::new(&env, &token).mint(&depositor, &100);
+    let pool_id = symbol_short!("anydep");
+    client.create_pool(&admin, &pool_id, &token, &vec![&env, pool_admin], &1);
+
+    client.pool_deposit(&depositor, &pool_id, &token, &100);
+
+    assert_eq!(client.get_pool(&pool_id).unwrap().balance, 100);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized signer")]
+fn test_pool_non_admin_withdraw_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let pool_admin = Address::generate(&env);
+    let depositor = Address::generate(&env);
+    let outsider = Address::generate(&env);
+    let token = setup_token(&env, &pool_admin);
+    StellarAssetClient::new(&env, &token).mint(&depositor, &100);
+    let pool_id = symbol_short!("badwith");
+    client.create_pool(&admin, &pool_id, &token, &vec![&env, pool_admin], &1);
+    client.pool_deposit(&depositor, &pool_id, &token, &100);
+
+    client.pool_withdraw(&vec![&env, outsider], &pool_id, &50, &depositor);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized signer")]
+fn test_pool_non_admin_add_admin_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let pool_admin = Address::generate(&env);
+    let outsider = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let token = setup_token(&env, &pool_admin);
+    let pool_id = symbol_short!("badadd");
+    client.create_pool(&admin, &pool_id, &token, &vec![&env, pool_admin], &1);
+
+    client.add_pool_admin(&vec![&env, outsider], &pool_id, &new_admin);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized signer")]
+fn test_pool_non_admin_remove_admin_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup_contract(&env);
+    let pool_admin = Address::generate(&env);
+    let outsider = Address::generate(&env);
+    let token = setup_token(&env, &pool_admin);
+    let pool_id = symbol_short!("badrem");
+    client.create_pool(&admin, &pool_id, &token, &vec![&env, pool_admin.clone()], &1);
+
+    client.remove_pool_admin(&vec![&env, outsider], &pool_id, &pool_admin);
 }
 
 #[test]

@@ -32,6 +32,7 @@ import { ConnectionHealthMonitor, HealthCheckConfig, ConnectionStatusCallback } 
 import { fetchWithTimeout } from "./utils/fetch.js";
 import type { QueueSigner, RunOptions } from "./queue.js";
 import { submitTransaction } from "./submit.js";
+import { decodeOffsetCursor, makeCursorPage, type CursorPage } from "./pagination.js";
 
 const { isSimulationError, isSimulationSuccess } = rpc.Api;
 
@@ -230,6 +231,21 @@ export interface SetProfileWithNewTokenParams {
   user: string;
   username: string;
   tokenParams: Omit<DeployCreatorTokenParams, "deployer">;
+}
+
+export interface CursorPageOptions {
+  limit?: number;
+  cursor?: string | null;
+}
+
+const MAX_CURSOR_PAGE_SIZE = 50;
+
+function normalizeCursorPage(options: CursorPageOptions = {}): { limit: number; offset: number } {
+  const limit = options.limit ?? 20;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CURSOR_PAGE_SIZE) {
+    throw new InvalidInputError(`limit must be an integer from 1 to ${MAX_CURSOR_PAGE_SIZE}`);
+  }
+  return { limit, offset: decodeOffsetCursor(options.cursor) };
 }
 
 /**
@@ -805,6 +821,30 @@ export class LinkoraClient extends GeneratedLinkoraClient {
       }
       return { ok: false, error: linkoraErr };
     }
+  }
+
+  /** Fetch a following-list page using an opaque offset cursor. */
+  async getFollowingPage(user: string, options: CursorPageOptions = {}): Promise<CursorPage<string>> {
+    const { limit, offset } = normalizeCursorPage(options);
+    const items = await super.getFollowing(user, offset, limit);
+    return makeCursorPage(items, limit, offset);
+  }
+
+  /** Fetch a follower-list page using an opaque offset cursor. */
+  async getFollowersPage(user: string, options: CursorPageOptions = {}): Promise<CursorPage<string>> {
+    const { limit, offset } = normalizeCursorPage(options);
+    const items = await super.getFollowers(user, offset, limit);
+    return makeCursorPage(items, limit, offset);
+  }
+
+  /** Fetch an author's post-ID page using an opaque offset cursor. */
+  async getPostsByAuthorPage(
+    author: string,
+    options: CursorPageOptions = {}
+  ): Promise<CursorPage<bigint>> {
+    const { limit, offset } = normalizeCursorPage(options);
+    const items = await super.getPostsByAuthor(author, offset, limit);
+    return makeCursorPage(items, limit, offset);
   }
 
   /**
