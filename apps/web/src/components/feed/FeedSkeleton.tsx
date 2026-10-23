@@ -30,10 +30,10 @@ export interface FeedSkeletonProps {
   /**
    * Number of skeleton post-card placeholders to render.
    *
-   * A count of 3 is generally enough to fill a typical viewport without
+   * A count of 5 is generally enough to fill a typical viewport without
    * causing layout jank when real cards swap in.
    *
-   * @defaultValue `3`
+   * @defaultValue `5`
    */
   count?: number;
 
@@ -64,7 +64,8 @@ function SkeletonCard({ masonry = false }: { masonry?: boolean }) {
   return (
     <div
       className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 p-4 space-y-3"
-      aria-hidden="true"
+      role="group"
+      aria-label="Loading post"
     >
       {/* Header: avatar + name */}
       <div className="flex items-center gap-3">
@@ -114,9 +115,9 @@ function SkeletonCard({ masonry = false }: { masonry?: boolean }) {
  * <FeedSkeleton count={2} masonry />
  * ```
  */
-export function FeedSkeleton({ count = 3, masonry = false }: FeedSkeletonProps) {
+export function FeedSkeleton({ count = 5, masonry = false }: FeedSkeletonProps) {
   return (
-    <div role="status" aria-label="Loading feed" className="space-y-4">
+    <div role="status" aria-label="Loading feed" aria-busy="true" className="space-y-4">
       <span className="sr-only">Loading feed…</span>
       {Array.from({ length: count }, (_, i) => (
         <SkeletonCard key={i} masonry={masonry} />
