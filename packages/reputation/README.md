@@ -69,23 +69,23 @@ rawScore =
 tipsReceivedXLM = tipTotalStroops / 10_000_000
 ```
 
-The final **reputation score** is an integer in `[0, 1000]`:
+The final **reputation score** is an integer in `[0, 10,000]`:
 
 ```
-score = Math.round(rawScore * 1000)
+score = Math.round(rawScore * 10_000)
 ```
 
 ---
 
 ## Tier Thresholds
 
-| Tier       | Score range | Display badge |
-| ---------- | ----------- | ------------- |
-| ◎ Unranked | 0 – 99      | —             |
-| 🥉 Bronze  | 100 – 299   | Bronze badge  |
-| 🥈 Silver  | 300 – 599   | Silver badge  |
-| 🥇 Gold    | 600 – 849   | Gold badge    |
-| 💎 Diamond | 850 – 1000  | Diamond badge |
+| Tier       | Score range  | Display badge |
+| ---------- | ------------ | ------------- |
+| ◎ Unranked | 0 – 999      | —             |
+| 🥉 Bronze  | 1,000 – 2,999 | Bronze badge  |
+| 🥈 Silver  | 3,000 – 5,999 | Silver badge  |
+| 🥇 Gold    | 6,000 – 8,499 | Gold badge    |
+| 💎 Diamond | 8,500 – 10,000 | Diamond badge |
 
 Tier boundaries are intentionally generous at the low end to reward early
 participation and progressively harder to reach at the top.
@@ -95,7 +95,7 @@ participation and progressively harder to reach at the top.
 ## Code Example
 
 ```ts
-import { computeReputationScore, getReputationTier } from "@linkora/reputation";
+import { computeScore, scoreToTier } from "@linkora/reputation";
 
 // Gather on-chain signals for a creator address.
 // In practice these come from the indexer REST API or the analytics oracle.
@@ -108,16 +108,16 @@ const signals = {
   credentialVerified: true,
 };
 
-// Compute the integer score [0, 1000].
-const score = computeReputationScore(signals);
-console.log(score); // e.g. 412
+// Compute the integer score [0, 10,000].
+const score = computeScore(signals);
+console.log(score); // e.g. 4,120
 
 // Map the score to a display tier.
-const tier = getReputationTier(score);
+const tier = scoreToTier(score);
 console.log(tier); // "silver"
 ```
 
-### `computeReputationScore(signals)`
+### `computeScore(signals, customWeights?)`
 
 ```ts
 interface ReputationSignals {
@@ -135,17 +135,18 @@ interface ReputationSignals {
   credentialVerified: boolean;
 }
 
-/** Returns an integer score in [0, 1000]. */
-function computeReputationScore(signals: ReputationSignals): number;
+/** Returns an integer score in [0, 10,000]. */
+function computeScore(signals: ReputationSignals, customWeights?: ScoreWeights): number;
 ```
 
-### `getReputationTier(score)`
+### `scoreToTier(score)`
 
 ```ts
 type ReputationTier = "unranked" | "bronze" | "silver" | "gold" | "diamond";
+type ScoreWeights = Partial<Record<keyof ReputationSignals, number>>;
 
-/** Maps a score in [0, 1000] to the corresponding tier string. */
-function getReputationTier(score: number): ReputationTier;
+/** Maps a score in [0, 10,000] to the corresponding tier string. */
+function scoreToTier(score: number): ReputationTier;
 ```
 
 ---
