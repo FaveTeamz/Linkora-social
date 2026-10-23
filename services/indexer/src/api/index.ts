@@ -15,6 +15,7 @@ import { createPoolsRouter } from "./routes/pools";
 import { createStateRootRouter } from "./routes/stateRoot";
 import { createNotificationsRouter } from "./routes/notifications";
 import { createGovernanceRouter } from "./routes/governance";
+import { createTipsRouter } from "./routes/tips";
 import { createUsersRouter } from "./routes/users";
 import { createFeedRouter } from "./routes/feed";
 import { createReputationRouter } from "./routes/reputation";
@@ -207,6 +208,7 @@ export function createApp(
   app.use("/api/follows", createFollowsRouter(db));
   app.use("/api/pools", createPoolsRouter(db));
   app.use("/api/governance", createGovernanceRouter(db));
+  app.use("/api/tips", createTipsRouter(db));
   app.use("/api/users", createUsersRouter(db));
   app.use("/api/feed", createFeedRouter(pg ?? db));
   if (webhookDispatcher) {

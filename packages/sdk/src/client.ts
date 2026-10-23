@@ -178,6 +178,55 @@ function ensurePositiveInteger(value: number | bigint, fieldName: string): bigin
   return ensureInteger(value, fieldName, 1);
 }
 
+function normalizeDate(value: Date | string | undefined, fieldName: string): Date | undefined {
+  if (value === undefined) return undefined;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new ValidationError(`${fieldName} must be a valid date.`);
+  }
+  return date;
+}
+
+function normalizeTipRecord(value: Record<string, unknown>): TipRecord {
+  const postId = value.post_id ?? value.postId;
+  const createdAt = value.created_at ?? value.createdAt;
+  const amount = value.amount;
+  const fee = value.fee;
+  const id = Number(value.id);
+  const timestamp = createdAt instanceof Date ? createdAt : new Date(String(createdAt));
+  if (!Number.isSafeInteger(id) || Number.isNaN(timestamp.getTime())) {
+    throw new LinkoraError("Indexer returned an invalid tip record.", "INVALID_RESPONSE");
+  }
+  try {
+    const normalizedPostId = BigInt(postId as string | number | bigint);
+    const normalizedAmount = BigInt(amount as string | number | bigint);
+    const normalizedFee = BigInt(fee as string | number | bigint);
+    const tipper = String(value.tipper ?? "");
+    const txHash = String(value.tx_hash ?? value.txHash ?? "");
+    if (
+      normalizedPostId <= 0n ||
+      normalizedAmount <= 0n ||
+      normalizedFee < 0n ||
+      normalizedFee > normalizedAmount ||
+      !tipper ||
+      !txHash
+    ) {
+      throw new Error("Tip record fields are outside their valid range.");
+    }
+    return {
+      id,
+      tipper,
+      post_id: normalizedPostId,
+      amount: normalizedAmount,
+      fee: normalizedFee,
+      created_at: timestamp,
+      tx_hash: txHash,
+    };
+  } catch (cause) {
+    throw new LinkoraError("Indexer returned an invalid tip record.", "INVALID_RESPONSE", undefined, cause);
+  }
+}
+
 function ensureGovParameter(parameter: GovParameter): void {
   const valid = Object.values(GovParameter).includes(parameter);
   if (!valid) {
@@ -285,6 +334,7 @@ export class LinkoraClient extends GeneratedLinkoraClient {
   private readonly _horizonUrl?: string;
   private readonly _indexerUrl: string;
   private readonly _rpcServer: rpc.Server;
+  private readonly _indexerUrl: string;
 
   constructor(config: ClientConfig) {
     super({
@@ -303,6 +353,7 @@ export class LinkoraClient extends GeneratedLinkoraClient {
     this._indexerUrl = (config.indexerUrl ?? "http://localhost:3001").replace(/\/$/, "");
 
     this._rpcServer = new rpc.Server(this._rpcUrl, { allowHttp: this._allowHttp });
+    this._indexerUrl = (config.indexerUrl ?? "http://localhost:3001/api").replace(/\/$/, "");
 
     this.classic = new ClassicAccountClient({
       networkPassphrase: this._networkPassphrase,
@@ -1780,6 +1831,105 @@ export class LinkoraClient extends GeneratedLinkoraClient {
       scvU64(postId)
     );
     return tx.toEnvelope().toXDR("base64");
+  }
+
+  /** List tips made to one post, newest first, using numeric offset cursors. */
+  async getTipsByPost(
+    postId: number | bigint,
+    options: TipHistoryOptions = {}
+  ): Promise<TipHistoryPage> {
+    const id = ensurePositiveInteger(postId, "postId");
+    return this.listTipRecords(`/tips/by-post/${id}`, options);
+  }
+
+  /** List tips received by a wallet across all of its posts. */
+  async getTipsReceived(
+    address: string,
+    options: TipHistoryOptions = {}
+  ): Promise<TipHistoryPage> {
+    ensureAddress(address, "address");
+    return this.listTipRecords(`/tips/received/${encodeURIComponent(address)}`, options);
+  }
+
+  /** List tips sent by a wallet. */
+  async getTipsSent(
+    address: string,
+    options: TipHistoryOptions = {}
+  ): Promise<TipHistoryPage> {
+    ensureAddress(address, "address");
+    return this.listTipRecords(`/tips/sent/${encodeURIComponent(address)}`, options);
+  }
+
+  /** Aggregate sent and received tips over the half-open `[from, to)` interval. */
+  async getTipTotals(
+    address: string,
+    from?: Date | string,
+    to?: Date | string
+  ): Promise<TipTotals> {
+    ensureAddress(address, "address");
+    const start = normalizeDate(from, "from");
+    const end = normalizeDate(to, "to");
+    if (start && end && start >= end) {
+      throw new ValidationError("from must be earlier than to.");
+    }
+    const query = new URLSearchParams();
+    if (start) query.set("from", start.toISOString());
+    if (end) query.set("to", end.toISOString());
+    const queryString = query.toString();
+    const suffix = queryString ? `?${queryString}` : "";
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}/tips/totals/${encodeURIComponent(address)}${suffix}`,
+      undefined,
+      this._timeoutMs
+    );
+    if (!response.ok) {
+      throw new NetworkError(`Indexer returned HTTP ${response.status} for tip totals.`, {
+        status: response.status,
+        address,
+      });
+    }
+    const body = (await response.json()) as Record<string, unknown>;
+    return {
+      sentCount: Number(body.sent_count ?? 0),
+      sentAmount: BigInt((body.sent_amount ?? 0) as string | number | bigint),
+      sentFee: BigInt((body.sent_fee ?? 0) as string | number | bigint),
+      receivedCount: Number(body.received_count ?? 0),
+      receivedAmount: BigInt((body.received_amount ?? 0) as string | number | bigint),
+      receivedFee: BigInt((body.received_fee ?? 0) as string | number | bigint),
+    };
+  }
+
+  private async listTipRecords(path: string, options: TipHistoryOptions): Promise<TipHistoryPage> {
+    const { limit = 20, cursor = "0" } = options;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new ValidationError("limit must be an integer between 1 and 100.");
+    }
+    if (!/^\d+$/.test(cursor) || !Number.isSafeInteger(Number(cursor))) {
+      throw new ValidationError("cursor must be a non-negative numeric offset.");
+    }
+    const query = new URLSearchParams({ limit: String(limit), cursor });
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}${path}?${query.toString()}`,
+      undefined,
+      this._timeoutMs
+    );
+    if (!response.ok) {
+      throw new NetworkError(`Indexer returned HTTP ${response.status} for tip history.`, {
+        status: response.status,
+        path,
+      });
+    }
+    const body = (await response.json()) as {
+      tips?: Array<Record<string, unknown>>;
+      total?: number;
+      next_cursor?: string | null;
+      nextCursor?: string | null;
+    };
+    return {
+      tips: (body.tips ?? []).map(normalizeTipRecord),
+      total: Number(body.total ?? 0),
+      nextCursor: body.nextCursor ?? body.next_cursor ?? null,
+    };
   }
 
   /**

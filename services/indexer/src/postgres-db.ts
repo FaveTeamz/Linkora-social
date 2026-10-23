@@ -6,11 +6,25 @@ import {
   Post,
   Like,
   Tip,
+  TipRecord,
+  TipTotals,
   Pool as PoolModel,
   GovernanceProposal,
   GovernanceVote,
   ReputationScore,
 } from "./db";
+
+function mapTipRecord(row: Record<string, unknown>): TipRecord {
+  return {
+    id: Number(row.id),
+    post_id: BigInt(row.post_id as string | number | bigint),
+    tipper: String(row.tipper),
+    amount: BigInt(row.amount as string | number | bigint),
+    fee: BigInt(row.fee as string | number | bigint),
+    created_at: row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at)),
+    tx_hash: String(row.tx_hash),
+  };
+}
 
 export class PostgresDatabase implements Database {
   private pool: Pool;
@@ -526,6 +540,81 @@ export class PostgresDatabase implements Database {
         tip.tx_hash,
       ]
     );
+  }
+
+  async listTipsByPost(
+    post_id: bigint,
+    limit: number,
+    offset: number
+  ): Promise<{ tips: TipRecord[]; total: number }> {
+    const count = await this.pool.query(
+      "SELECT COUNT(*)::int AS total FROM tips WHERE post_id = $1",
+      [post_id.toString()]
+    );
+    const result = await this.pool.query(
+      `SELECT id, post_id, tipper, amount, fee, created_at, tx_hash
+       FROM tips WHERE post_id = $1 ORDER BY id DESC OFFSET $2 LIMIT $3`,
+      [post_id.toString(), offset, limit]
+    );
+    return { tips: result.rows.map(mapTipRecord), total: count.rows[0]?.total ?? 0 };
+  }
+
+  async listTipsReceived(
+    address: string,
+    limit: number,
+    offset: number
+  ): Promise<{ tips: TipRecord[]; total: number }> {
+    const params = [address];
+    const count = await this.pool.query(
+      "SELECT COUNT(*)::int AS total FROM tips t JOIN posts p ON p.id = t.post_id WHERE p.author = $1",
+      params
+    );
+    const result = await this.pool.query(
+      `SELECT t.id, t.post_id, t.tipper, t.amount, t.fee, t.created_at, t.tx_hash
+       FROM tips t JOIN posts p ON p.id = t.post_id WHERE p.author = $1
+       ORDER BY t.id DESC OFFSET $2 LIMIT $3`,
+      [address, offset, limit]
+    );
+    return { tips: result.rows.map(mapTipRecord), total: count.rows[0]?.total ?? 0 };
+  }
+
+  async listTipsSent(
+    address: string,
+    limit: number,
+    offset: number
+  ): Promise<{ tips: TipRecord[]; total: number }> {
+    const count = await this.pool.query("SELECT COUNT(*)::int AS total FROM tips WHERE tipper = $1", [address]);
+    const result = await this.pool.query(
+      `SELECT id, post_id, tipper, amount, fee, created_at, tx_hash
+       FROM tips WHERE tipper = $1 ORDER BY id DESC OFFSET $2 LIMIT $3`,
+      [address, offset, limit]
+    );
+    return { tips: result.rows.map(mapTipRecord), total: count.rows[0]?.total ?? 0 };
+  }
+
+  async getTipTotals(address: string, from?: Date, to?: Date): Promise<TipTotals> {
+    const result = await this.pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE t.tipper = $1)::int AS sent_count,
+         COALESCE(SUM(t.amount) FILTER (WHERE t.tipper = $1), 0)::text AS sent_amount,
+         COALESCE(SUM(t.fee) FILTER (WHERE t.tipper = $1), 0)::text AS sent_fee,
+         COUNT(*) FILTER (WHERE p.author = $1)::int AS received_count,
+         COALESCE(SUM(t.amount - t.fee) FILTER (WHERE p.author = $1), 0)::text AS received_amount,
+         COALESCE(SUM(t.fee) FILTER (WHERE p.author = $1), 0)::text AS received_fee
+       FROM tips t JOIN posts p ON p.id = t.post_id
+       WHERE ($2::timestamptz IS NULL OR (t.created_at AT TIME ZONE 'UTC') >= $2)
+         AND ($3::timestamptz IS NULL OR (t.created_at AT TIME ZONE 'UTC') < $3)`,
+      [address, from ?? null, to ?? null]
+    );
+    const row = result.rows[0] ?? {};
+    return {
+      sent_count: Number(row.sent_count ?? 0),
+      sent_amount: BigInt(row.sent_amount ?? 0),
+      sent_fee: BigInt(row.sent_fee ?? 0),
+      received_count: Number(row.received_count ?? 0),
+      received_amount: BigInt(row.received_amount ?? 0),
+      received_fee: BigInt(row.received_fee ?? 0),
+    };
   }
 
   // ───────────────────────────────── Pools ────────────────────────────────────

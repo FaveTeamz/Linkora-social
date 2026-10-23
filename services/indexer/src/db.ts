@@ -47,6 +47,25 @@ export interface Tip {
   tx_hash: string;
 }
 
+export interface TipRecord {
+  id: number;
+  tipper: string;
+  post_id: bigint;
+  amount: bigint;
+  fee: bigint;
+  created_at: Date;
+  tx_hash: string;
+}
+
+export interface TipTotals {
+  sent_count: number;
+  sent_amount: bigint;
+  sent_fee: bigint;
+  received_count: number;
+  received_amount: bigint;
+  received_fee: bigint;
+}
+
 export interface Report {
   id?: number;
   post_id: bigint;
@@ -137,6 +156,10 @@ export interface Database {
 
   // Tips
   insertTip(tip: Tip): Promise<void>;
+  listTipsByPost(post_id: bigint, limit: number, offset: number): Promise<{ tips: TipRecord[]; total: number }>;
+  listTipsReceived(address: string, limit: number, offset: number): Promise<{ tips: TipRecord[]; total: number }>;
+  listTipsSent(address: string, limit: number, offset: number): Promise<{ tips: TipRecord[]; total: number }>;
+  getTipTotals(address: string, from?: Date, to?: Date): Promise<TipTotals>;
 
   // Reports
   insertReport(report: Report): Promise<void>;
