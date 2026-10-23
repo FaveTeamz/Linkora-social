@@ -353,6 +353,10 @@ describe("LinkoraClient write methods", () => {
     );
   });
 
+  it("rejects post content longer than the contract input limit", () => {
+    expect(() => client.createPost("GVALID", "x".repeat(501))).toThrow(InvalidInputError);
+  });
+
   it("rejects oversized byte arrays for verifyAnalyticsAttestation", () => {
     const oversizedReportCbor = new Uint8Array(64 * 1024 + 1);
     const validSignature = new Uint8Array(64).fill(0xab);
@@ -401,6 +405,25 @@ describe("prepare*Tx methods (Submittable)", () => {
       expect.objectContaining({ _accountId: "GAUTHOR" }),
       addr("GAUTHOR"),
       val("hello")
+    );
+  });
+
+  it("prepareSetProfileTx simulates with the profile owner as source", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    jest.spyOn(client as any, "getAccountForTx").mockResolvedValue(new Account("GUSER", "100"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    jest.spyOn(client, "prepareTransaction").mockResolvedValue({
+      toEnvelope: () => ({ toXDR: () => "PREPARED_XDR" }),
+    } as unknown as Awaited<ReturnType<typeof client.prepareTransaction>>);
+
+    const result = await client.prepareSetProfileTx("GUSER", "alice", "CTOKEN");
+    expect(result).toBe("PREPARED_XDR");
+    expect(client.prepareTransaction).toHaveBeenCalledWith(
+      "set_profile",
+      expect.objectContaining({ _accountId: "GUSER" }),
+      addr("GUSER"),
+      val("alice"),
+      addr("CTOKEN"),
     );
   });
 

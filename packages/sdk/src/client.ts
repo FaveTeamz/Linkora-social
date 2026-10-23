@@ -41,6 +41,14 @@ const { isSimulationError, isSimulationSuccess } = rpc.Api;
 const DEFAULT_NETWORK = "Test SDF Network ; September 2015";
 const DEFAULT_TIMEOUT = 30;
 const MAX_BYTES = 64 * 1024; // 64KB max limit for Soroban host function byte arguments
+const MAX_POST_CONTENT_LENGTH = 500;
+
+function validatePostContent(content: string): void {
+  ensureNonEmptyString(content, "content");
+  if (content.length > MAX_POST_CONTENT_LENGTH) {
+    throw new InvalidInputError(`content must be at most ${MAX_POST_CONTENT_LENGTH} characters.`);
+  }
+}
 
 /**
  * Detect whether a hostname refers to the local machine (loopback only).
@@ -1721,6 +1729,29 @@ export class LinkoraClient extends GeneratedLinkoraClient {
     return super.setProfile(user, username, creatorToken);
   }
 
+  /** Build, simulate, and submit a set_profile transaction through the transaction queue. */
+  async submitSetProfile(
+    user: string,
+    username: string,
+    creatorToken: string,
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions,
+  ): Promise<string> {
+    ensureAddress(user, "user");
+    ensureNonEmptyString(username, "username");
+    ensureAddress(creatorToken, "creatorToken");
+    const sourceAccount = await this.getAccountForTx(user, horizonUrl);
+    const tx = await this.prepareTransaction(
+      "set_profile",
+      sourceAccount,
+      scvAddress(user),
+      scvString(username),
+      scvAddress(creatorToken),
+    );
+    return this.submitTransaction(tx, signer, opts);
+  }
+
   /**
    * Delete a user's profile.
    *
@@ -1753,7 +1784,7 @@ export class LinkoraClient extends GeneratedLinkoraClient {
    */
   createPost(author: string, content: string): string {
     ensureAddress(author, "author");
-    ensureNonEmptyString(content, "content");
+    validatePostContent(content);
     return super.createPost(author, content);
   }
 
@@ -1767,13 +1798,55 @@ export class LinkoraClient extends GeneratedLinkoraClient {
    */
   async prepareCreatePostTx(author: string, content: string, horizonUrl?: string): Promise<string> {
     ensureAddress(author, "author");
-    ensureNonEmptyString(content, "content");
+    validatePostContent(content);
     const sourceAccount = await this.getAccountForTx(author, horizonUrl);
     const tx = await this.prepareTransaction(
       "create_post",
       sourceAccount,
       scvAddress(author),
       scvString(content)
+    );
+    return tx.toEnvelope().toXDR("base64");
+  }
+
+  /** Submit a post and return its contract-assigned post ID after confirmation. */
+  async createPostAndSubmit(
+    author: string,
+    content: string,
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions,
+  ): Promise<{ postId: bigint }> {
+    const transactionXdr = await this.prepareCreatePostTx(author, content, horizonUrl);
+    const hash = await this.submitTransaction(transactionXdr, signer, opts);
+    const result = await this._rpcServer.getTransaction(hash);
+    if (!("returnValue" in result) || !result.returnValue) {
+      throw new Error("Confirmed create_post transaction did not include a return value.");
+    }
+    const value = scValToNative(result.returnValue);
+    if (typeof value !== "bigint" && typeof value !== "number") {
+      throw new Error("create_post returned an invalid post ID.");
+    }
+    return { postId: BigInt(value) };
+  }
+
+  /** Build and simulate set_profile, returning an unsigned envelope for wallet signing. */
+  async prepareSetProfileTx(
+    user: string,
+    username: string,
+    creatorToken: string,
+    horizonUrl?: string,
+  ): Promise<string> {
+    ensureAddress(user, "user");
+    ensureNonEmptyString(username, "username");
+    ensureAddress(creatorToken, "creatorToken");
+    const sourceAccount = await this.getAccountForTx(user, horizonUrl);
+    const tx = await this.prepareTransaction(
+      "set_profile",
+      sourceAccount,
+      scvAddress(user),
+      scvString(username),
+      scvAddress(creatorToken),
     );
     return tx.toEnvelope().toXDR("base64");
   }
