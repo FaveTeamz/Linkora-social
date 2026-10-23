@@ -14,6 +14,7 @@ export interface SorobanEvent {
   value?: string;
   data?: string;
   txHash?: string;
+  schemaHash?: string;
 }
 
 export interface LinkoraEventMeta {

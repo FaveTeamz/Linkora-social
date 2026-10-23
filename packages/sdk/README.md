@@ -71,6 +71,13 @@ try {
 The lower-level primitives (`backoffWithJitter`, `CircuitBreaker`,
 `parseRetryAfter`, `withRetry`) are exported directly for reuse.
 
+### Analytics and reputation reads
+
+`AnalyticsClient` reads creator and platform metrics from the analytics oracle
+and caches each period for five minutes. `ReputationClient` reads a creator's
+score or a paginated leaderboard from the indexer. Configure their respective
+`baseUrl` or `indexerUrl` when the services do not use their local defaults.
+
 ### Dry-run status events
 
 `TransactionQueue` emits status events via `queue.on("status", ...)`. When run
@@ -97,6 +104,16 @@ queue.on("status", (e) => {
 ```
 
 ## Pagination
+
+### Contract schema changes
+
+The SDK generator writes the ABI hash to `src/generated/schema.hash` and the
+matching runtime constant to `src/generated/schema.ts`. Regenerate both files
+whenever the contract spec changes, review the generated type and event changes,
+and deploy indexers or WebSocket providers that expose the new `schemaHash` with
+events. Subscribers warn once when a provider reports a different hash and
+continue decoding for compatibility; consumers should use the warning to plan
+their migration before relying on newly added event fields.
 
 The SDK exposes three distinct pagination models depending on which layer you
 are querying. Understanding each one is important for building correct,

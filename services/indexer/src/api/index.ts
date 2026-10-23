@@ -17,6 +17,7 @@ import { createNotificationsRouter } from "./routes/notifications";
 import { createGovernanceRouter } from "./routes/governance";
 import { createUsersRouter } from "./routes/users";
 import { createFeedRouter } from "./routes/feed";
+import { createReputationRouter } from "./routes/reputation";
 import { createSearchRouter } from "./routes/search";
 import { MediaUploadConfig } from "../config";
 import { isFenced } from "../gossip";

@@ -8,6 +8,22 @@ export interface CreatorStats {
   uniqueTippers: number;
 }
 
+export interface PlatformStats {
+  totalTips: bigint;
+  postCount: bigint;
+  followerDelta: bigint;
+  uniqueTippers: number;
+  creatorCount: number;
+}
+
+export interface CreatorMetrics {
+  creatorAddress: string;
+  totalTips: bigint;
+  postCount: bigint;
+  followerDelta: bigint;
+  uniqueTippers: number;
+}
+
 export class CreatorStatsValidationError extends Error {
   constructor(
     message: string,
@@ -114,4 +130,80 @@ export async function fetchCreatorStats(
     validateCreatorStats(stats);
     return stats;
   });
+}
+
+/** Aggregate platform-wide totals for an inclusive time window. */
+export async function fetchPlatformStats(
+  db: Pool,
+  windowStart: Date
+): Promise<PlatformStats> {
+  const windowStartEpoch = Math.floor(windowStart.getTime() / 1000);
+  const result = await db.query<{
+    total_tips: string;
+    post_count: string;
+    follower_delta: string;
+    unique_tippers: string;
+    creator_count: string;
+  }>(
+    `
+    SELECT
+      (SELECT COALESCE(SUM(amount), 0)::text FROM tips
+        WHERE created_at >= $1) AS total_tips,
+      (SELECT COUNT(*)::text FROM posts
+        WHERE created_at >= $1) AS post_count,
+      ((SELECT COUNT(*) FROM follows
+          WHERE created_at >= $2))::text AS follower_delta,
+      (SELECT COUNT(DISTINCT tipper)::text FROM tips
+        WHERE created_at >= $1) AS unique_tippers,
+      (SELECT COUNT(DISTINCT author)::text FROM posts
+        WHERE created_at >= $1) AS creator_count
+    `,
+    [windowStart, windowStartEpoch]
+  );
+  const row = result.rows[0];
+  return {
+    totalTips: BigInt(row?.total_tips ?? "0"),
+    postCount: BigInt(row?.post_count ?? "0"),
+    followerDelta: BigInt(row?.follower_delta ?? "0"),
+    uniqueTippers: Number(row?.unique_tippers ?? 0),
+    creatorCount: Number(row?.creator_count ?? 0),
+  };
+}
+
+/** Aggregate a creator's current window using the indexer's timestamped domain tables. */
+export async function fetchCreatorMetrics(
+  db: Pool,
+  creatorAddress: string,
+  windowStart: Date
+): Promise<CreatorMetrics> {
+  const windowStartEpoch = Math.floor(windowStart.getTime() / 1000);
+  const result = await db.query<{
+    total_tips: string;
+    post_count: string;
+    follower_delta: string;
+    unique_tippers: string;
+  }>(
+    `
+    SELECT
+      (SELECT COALESCE(SUM(t.amount), 0)::text
+        FROM tips t JOIN posts p ON p.id = t.post_id
+        WHERE p.author = $1 AND t.created_at >= $2) AS total_tips,
+      (SELECT COUNT(*)::text FROM posts
+        WHERE author = $1 AND created_at >= $2) AS post_count,
+      (SELECT COUNT(*)::text FROM follows
+        WHERE followee = $1 AND created_at >= $3) AS follower_delta,
+      (SELECT COUNT(DISTINCT t.tipper)::text
+        FROM tips t JOIN posts p ON p.id = t.post_id
+        WHERE p.author = $1 AND t.created_at >= $2) AS unique_tippers
+    `,
+    [creatorAddress, windowStart, windowStartEpoch]
+  );
+  const row = result.rows[0];
+  return {
+    creatorAddress,
+    totalTips: BigInt(row?.total_tips ?? "0"),
+    postCount: BigInt(row?.post_count ?? "0"),
+    followerDelta: BigInt(row?.follower_delta ?? "0"),
+    uniqueTippers: Number(row?.unique_tippers ?? 0),
+  };
 }
