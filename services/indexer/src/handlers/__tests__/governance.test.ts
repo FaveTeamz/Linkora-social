@@ -30,6 +30,7 @@ function makeMockDb(): jest.Mocked<Database> {
     updateGovernanceProposalStatus: jest.fn().mockResolvedValue(undefined),
     insertGovernanceVote: jest.fn().mockResolvedValue(true),
     listGovernanceProposals: jest.fn(),
+    getGovernanceProposal: jest.fn(),
     getProfile: jest.fn(),
     listPosts: jest.fn(),
     getFollowers: jest.fn(),

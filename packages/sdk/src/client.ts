@@ -17,17 +17,19 @@ import { Profile, Post, Pool, SimulationResult, LedgerFootprint } from "./types.
 import {
   mapError,
   NotFoundError,
+  UnauthorizedError,
   SimulationError,
   ValidationError,
   InvalidInputError,
   NetworkError,
   LinkoraError,
   VersionMismatchError,
+  InsufficientBalanceError,
   ReadResult,
 } from "./errors.js";
 import { ClassicAccountClient, ClassicBalance } from "./classic.js";
-import { GovParameter } from "./generated/types.js";
-import type { GovProposal } from "./generated/types.js";
+import { GovParameter, GovStatus } from "./generated/types.js";
+import type { GovProposal, GovParameter as GovParameterType } from "./generated/types.js";
 import { ConnectionHealthMonitor, HealthCheckConfig, ConnectionStatusCallback } from "./health.js";
 import { fetchWithTimeout } from "./utils/fetch.js";
 import type { QueueSigner, RunOptions } from "./queue.js";
@@ -293,6 +295,17 @@ export interface DeployCreatorTokenParams {
   symbol: string;
   decimals: number;
   initialSupply: bigint;
+}
+
+export interface GovernanceProposalListOptions {
+  status?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface GovernanceProposalList {
+  proposals: GovProposal[];
+  nextCursor: string | null;
 }
 
 export interface SetProfileWithNewTokenParams {
@@ -1357,6 +1370,199 @@ export class LinkoraClient extends GeneratedLinkoraClient {
 
   // ── Governance convenience overrides ──────────────────────────────────────
 
+  /** Fetch an indexed governance proposal. Unknown IDs return null. */
+  async getProposal(proposalId: number | bigint | string): Promise<GovProposal | null> {
+    const id = normalizePositiveId(proposalId, "proposalId");
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}/governance/proposals/${id}`,
+      undefined,
+      this._timeoutMs
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new NetworkError(`Indexer returned HTTP ${response.status} for governance proposal.`, {
+        status: response.status,
+        proposalId: id,
+      });
+    }
+    const body = (await response.json()) as { proposal?: Record<string, unknown> } & Record<string, unknown>;
+    return normalizeIndexerProposal(body.proposal ?? body);
+  }
+
+  /** List indexed proposals with optional status filtering and cursor pagination. */
+  async listProposals(options: GovernanceProposalListOptions = {}): Promise<GovernanceProposalList> {
+    const { status, cursor, limit = 20 } = options;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new ValidationError("limit must be an integer between 1 and 100.");
+    }
+    if (cursor !== undefined && !/^\d+$/.test(cursor)) {
+      throw new ValidationError("cursor must be a non-negative numeric offset.");
+    }
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (status) query.set("status", status);
+    if (cursor) query.set("cursor", cursor);
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}/governance/proposals?${query.toString()}`,
+      undefined,
+      this._timeoutMs
+    );
+    if (!response.ok) {
+      throw new NetworkError(`Indexer returned HTTP ${response.status} while listing proposals.`, {
+        status: response.status,
+      });
+    }
+    const body = (await response.json()) as {
+      proposals?: Record<string, unknown>[];
+      nextCursor?: string | null;
+      next_cursor?: string | null;
+    };
+    return {
+      proposals: (body.proposals ?? []).map(normalizeIndexerProposal),
+      nextCursor: body.nextCursor ?? body.next_cursor ?? null,
+    };
+  }
+
+  /** Fetch voting power from the indexer for a wallet address. */
+  async getVotingPower(address: string): Promise<bigint> {
+    ensureAddress(address, "address");
+    const response = await fetchWithTimeout(
+      `${this._indexerUrl}/governance/voting-power/${encodeURIComponent(address)}`,
+      undefined,
+      this._timeoutMs
+    );
+    if (!response.ok) {
+      throw new NetworkError(`Indexer returned HTTP ${response.status} for voting power.`, {
+        status: response.status,
+        address,
+      });
+    }
+    const body = (await response.json()) as { votingPower?: string | number | bigint; voting_power?: string | number | bigint };
+    const value = body.votingPower ?? body.voting_power ?? 0;
+    try {
+      return BigInt(value);
+    } catch (cause) {
+      throw new LinkoraError("Indexer returned invalid voting power.", "INVALID_RESPONSE", { address }, cause);
+    }
+  }
+
+  /** Submit a governance proposal through the SDK transaction queue. */
+  async createProposal(
+    proposer: string,
+    parameter: GovParameter,
+    newValue: number | bigint,
+    newAddress: string | null,
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions
+  ): Promise<{ proposalId: bigint }> {
+    ensureAddress(proposer, "proposer");
+    ensureGovParameter(parameter);
+    ensureInteger(newValue, "newValue");
+    if (newAddress !== null) ensureAddress(newAddress, "newAddress");
+    const source = await this.getAccountForTx(proposer, horizonUrl);
+    const tx = await this.prepareTransaction(
+      "gov_propose",
+      source,
+      scvAddress(proposer),
+      nativeToScVal(parameter),
+      scvU64(newValue),
+      nativeToScVal(newAddress)
+    );
+    const hash = await this.submitTransaction(tx, signer, opts);
+    const response = await this._rpcServer.getTransaction(hash);
+    const returnValue = (response as unknown as { returnValue?: xdr.ScVal }).returnValue;
+    if (!returnValue) {
+      throw new LinkoraError("Confirmed proposal transaction did not include its proposal ID.", "INVALID_RESPONSE", { hash });
+    }
+    const value = scValToNative(returnValue);
+    try {
+      return { proposalId: BigInt(value as string | number | bigint) };
+    } catch (cause) {
+      throw new LinkoraError("Proposal transaction returned an invalid proposal ID.", "INVALID_RESPONSE", { hash }, cause);
+    }
+  }
+
+  /** Submit a vote (`true`/`for` or `false`/`against`) through the transaction queue. */
+  async vote(
+    voter: string,
+    proposalId: number | bigint,
+    choice: boolean | "for" | "against",
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions
+  ): Promise<{ txHash: string }> {
+    ensureAddress(voter, "voter");
+    const id = ensurePositiveInteger(proposalId, "proposalId");
+    const support = typeof choice === "boolean" ? choice : choice === "for";
+    const source = await this.getAccountForTx(voter, horizonUrl);
+    const tx = await this.prepareTransaction(
+      "gov_vote",
+      source,
+      scvAddress(voter),
+      scvU64(id),
+      nativeToScVal(support)
+    );
+    return { txHash: await this.submitTransaction(tx, signer, opts) };
+  }
+
+  /** Build, validate, and queue a pool withdrawal against its on-chain M-of-N policy. */
+  async withdraw(
+    signers: string[],
+    poolId: string,
+    amount: number | bigint,
+    recipient: string,
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions
+  ): Promise<{ txHash: string }> {
+    ensureAddressList(signers, "signers");
+    ensureNonEmptyString(poolId, "poolId");
+    const withdrawalAmount = ensurePositiveInteger(amount, "amount");
+    ensureAddress(recipient, "recipient");
+    if (new Set(signers).size !== signers.length) {
+      throw new ValidationError("Withdrawal signers must be unique.", { poolId });
+    }
+    const pool = await this.getPool(poolId);
+    if (!pool) throw new NotFoundError(`Pool ${poolId} was not found.`, { poolId });
+    const admins = await this.getPoolAdmins(poolId);
+    if (!admins) throw new NotFoundError(`Pool ${poolId} was not found.`, { poolId });
+    const unauthorized = signers.filter((address) => !admins.includes(address));
+    if (unauthorized.length) {
+      throw new UnauthorizedError("Every withdrawal signer must be a pool admin.", {
+        poolId,
+        unauthorizedSigners: unauthorized,
+      });
+    }
+    if (signers.length < pool.threshold) {
+      throw new ValidationError(
+        `Pool withdrawal requires ${pool.threshold} admin signatures; received ${signers.length}.`,
+        { poolId, requiredThreshold: pool.threshold, providedSigners: signers.length }
+      );
+    }
+    if (pool.balance < withdrawalAmount) {
+      throw new InsufficientBalanceError("Pool balance is insufficient for this withdrawal.", {
+        poolId,
+        available: pool.balance.toString(),
+        required: withdrawalAmount.toString(),
+      });
+    }
+    const xdrString = await this.preparePoolWithdrawTx(signers, poolId, amount, recipient, horizonUrl);
+    try {
+      return { txHash: await this.submitTransaction(xdrString, signer, opts) };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      if (/insufficient signers|threshold/i.test(message)) {
+        throw new LinkoraError(
+          `Pool withdrawal failed to meet its ${pool.threshold}-of-${admins.length} admin threshold.`,
+          "POOL_THRESHOLD_NOT_MET",
+          { poolId, requiredThreshold: pool.threshold, providedSigners: signers.length },
+          cause
+        );
+      }
+      throw cause;
+    }
+  }
+
   /**
    * Propose a change to a governance parameter.
    *
@@ -1986,6 +2192,81 @@ export class LinkoraClient extends GeneratedLinkoraClient {
       scvI128(amount)
     );
     return tx.toEnvelope().toXDR("base64");
+  }
+
+  /** Check the token balance, prepare the contract's fee-split tip call, and submit it via the queue. */
+  async sendTip(
+    tipper: string,
+    postId: number | bigint,
+    token: string,
+    amount: number | bigint,
+    signer: QueueSigner,
+    horizonUrl?: string,
+    opts?: RunOptions
+  ): Promise<{ txHash: string }> {
+    ensureAddress(tipper, "tipper");
+    ensurePositiveInteger(postId, "postId");
+    ensureAddress(token, "token");
+    const amountBigInt = ensurePositiveInteger(amount, "amount");
+
+    const feeBps = await this.getFeeBps();
+    if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 10_000) {
+      throw new LinkoraError("Contract returned an invalid platform fee rate.", "INVALID_RESPONSE", {
+        feeBps,
+      });
+    }
+    // Keep the contract's floor-rounded fee calculation explicit for validation
+    // and parity: the contract transfers this share to treasury and the balance
+    // check covers the full gross amount supplied to `tip`.
+    const feeAmount = (amountBigInt * BigInt(feeBps)) / 10_000n;
+    const authorAmount = amountBigInt - feeAmount;
+    if (feeAmount < 0n || authorAmount < 0n) {
+      throw new LinkoraError("Contract returned an invalid platform fee split.", "INVALID_RESPONSE");
+    }
+
+    const balance = await this.getSep41Balance(tipper, token, horizonUrl);
+    if (balance < amountBigInt) {
+      throw new InsufficientBalanceError("Insufficient token balance to send this tip.", {
+        tipper,
+        token,
+        available: balance.toString(),
+        required: amountBigInt.toString(),
+      });
+    }
+
+    const xdrString = await this.prepareTipTx(tipper, postId, token, amountBigInt, horizonUrl);
+    return { txHash: await this.submitTransaction(xdrString, signer, opts) };
+  }
+
+  private async getSep41Balance(
+    owner: string,
+    token: string,
+    horizonUrl?: string
+  ): Promise<bigint> {
+    const source = await this.getAccountForTx(owner, horizonUrl);
+    const transaction = new TransactionBuilder(source, {
+      fee: "100",
+      networkPassphrase: this._networkPassphrase,
+    })
+      .addOperation(new Contract(token).call("balance", scvAddress(owner)))
+      .setTimeout(DEFAULT_TIMEOUT)
+      .build();
+    const simulation = await this._rpcServer.simulateTransaction(transaction);
+    if (isSimulationError(simulation)) {
+      throw mapError(simulation.error);
+    }
+    if (!isSimulationSuccess(simulation) || !simulation.result?.retval) {
+      throw new SimulationError("Unable to read token balance from simulation.", undefined, simulation);
+    }
+    const raw = scValToNative(simulation.result.retval);
+    try {
+      return BigInt(raw as string | number | bigint);
+    } catch (cause) {
+      throw new LinkoraError("Token contract returned an invalid balance.", "INVALID_RESPONSE", {
+        token,
+        owner,
+      }, cause);
+    }
   }
 
   /**

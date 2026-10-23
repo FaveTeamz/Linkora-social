@@ -195,7 +195,9 @@ export interface Database {
   listGovernanceProposals(filters: {
     limit: number;
     offset: number;
+    status?: string;
   }): Promise<{ proposals: GovernanceProposal[]; total: number }>;
+  getGovernanceProposal(proposal_id: bigint): Promise<GovernanceProposal | null>;
 
   // Query methods used by the REST API
   getProfile(address: string): Promise<Profile | null>;

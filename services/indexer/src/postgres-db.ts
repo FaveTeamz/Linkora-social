@@ -907,10 +907,12 @@ export class PostgresDatabase implements Database {
   async listGovernanceProposals(filters: {
     limit: number;
     offset: number;
+    status?: string;
   }): Promise<{ proposals: GovernanceProposal[]; total: number }> {
-    const { limit, offset } = filters;
+    const { limit, offset, status } = filters;
     const totalRes = await this.pool.query(
-      `SELECT COUNT(*)::int AS total FROM governance_proposals`
+      `SELECT COUNT(*)::int AS total FROM governance_proposals WHERE ($1::text IS NULL OR status = $1)`,
+      [status ?? null]
     );
     const total = totalRes.rows[0]?.total ?? 0;
 
@@ -918,10 +920,11 @@ export class PostgresDatabase implements Database {
       `
       SELECT proposal_id, proposer, parameter, new_value, votes_for, votes_against, status, created_ledger, updated_ledger
       FROM governance_proposals
+      WHERE ($3::text IS NULL OR status = $3)
       ORDER BY proposal_id DESC
       OFFSET $1 LIMIT $2
       `,
-      [offset, limit]
+      [offset, limit, status ?? null]
     );
 
     const proposals: GovernanceProposal[] = res.rows.map((row) => ({
@@ -937,6 +940,27 @@ export class PostgresDatabase implements Database {
     }));
 
     return { proposals, total };
+  }
+
+  async getGovernanceProposal(proposal_id: bigint): Promise<GovernanceProposal | null> {
+    const result = await this.pool.query(
+      `SELECT proposal_id, proposer, parameter, new_value, votes_for, votes_against, status, created_ledger, updated_ledger
+       FROM governance_proposals WHERE proposal_id = $1 LIMIT 1`,
+      [proposal_id.toString()]
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      proposal_id: BigInt(row.proposal_id),
+      proposer: row.proposer,
+      parameter: row.parameter,
+      new_value: BigInt(row.new_value),
+      votes_for: BigInt(row.votes_for),
+      votes_against: BigInt(row.votes_against),
+      status: row.status,
+      created_ledger: row.created_ledger,
+      updated_ledger: row.updated_ledger,
+    };
   }
 
   async updateReportStatus(
